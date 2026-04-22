@@ -1,0 +1,6 @@
+{
+  "name": "pySync — Real Estate CRM",
+  "description": "A production-ready full-stack Real Estate CRM with RBAC, approval workflows, and audit logging.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
