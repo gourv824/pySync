@@ -7,9 +7,8 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="PySync" />
-    <link rel="icon" type="image/png" href="/logo192.png" />
     <link rel="manifest" href="/manifest.json" />
-    <link rel="apple-touch-icon" href="/logo192.png" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
     <title>PySync Real Estate</title>
   </head>
   <body>
@@ -21,8 +20,6 @@
           navigator.serviceWorker.register('/sw.js')
             .then(registration => {
               console.log('SW registered: ', registration);
-              // Force update check on every load
-              registration.update();
             })
             .catch(registrationError => {
               console.log('SW registration failed: ', registrationError);
@@ -32,3 +29,4 @@
     </script>
   </body>
 </html>
+

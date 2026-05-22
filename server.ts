@@ -1,23 +1,20 @@
 import express, { Request, Response, NextFunction } from "express";
-import { createServer } from "http";
 import path from "path";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import fs from "fs";
 import cors from "cors";
+import dotenv from "dotenv";
+import jwt from "jsonwebtoken";
 import { ProjectController } from "./src/server/controllers/ProjectController";
 import { ResalePropertyController } from "./src/server/controllers/ResalePropertyController";
 import { ReportController } from "./src/server/controllers/ReportController";
 import { sendNewProjectNotification, sendApprovalRequestNotification, sendStatusUpdateNotification, sendPasswordResetEmail } from "./src/server/services/emailService";
-import { getDb, saveDb, sqlite_db } from "./src/lib/db";
-import { serverConfig, isProduction } from "./src/server/infrastructure/config";
-import { registerHttpMiddleware } from "./src/server/infrastructure/httpMiddleware";
-import { registerHealthRoutes } from "./src/server/infrastructure/healthRoutes";
-import { globalErrorHandler } from "./src/server/infrastructure/errorHandler";
-import { registerServerLifecycle } from "./src/server/infrastructure/serverLifecycle";
-import { ROLE_PERMISSIONS } from "./src/server/infrastructure/permissions";
-import { logger } from "./src/server/infrastructure/logger";
-import { getStorageProvider } from './src/server/infrastructure/StorageService';
+import { getDb, saveDb } from "./src/lib/db";
+
+dotenv.config();
+
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-for-development';
 
 const projectController = new ProjectController();
 const resalePropertyController = new ResalePropertyController();
@@ -25,21 +22,100 @@ const reportController = new ReportController();
 
 async function startServer() {
   const app = express();
+  const PORT = 3000;
 
-  // Serve uploads folder as static
-  app.use('/api/media', express.static(path.join(process.cwd(), 'uploads')));
+  const ROLE_PERMISSIONS: Record<string, string[]> = {
+    admin: ['MANAGE_USERS', 'VIEW_PROJECTS', 'ADD_PROJECTS', 'EDIT_PROJECTS', 'DELETE_PROJECTS', 'APPROVE_DELETIONS', 'VIEW_LOGS', 'VIEW_STATS', 'VIEW_RESALE', 'ADD_RESALE', 'EDIT_RESALE', 'DELETE_RESALE', 'MANAGE_PERMISSIONS', 'MANAGE_TEAM', 'VIEW_REPORTS', 'ADD_REPORTS', 'EDIT_REPORTS', 'DELETE_REPORTS'],
+    team_leader: ['VIEW_PROJECTS', 'ADD_PROJECTS', 'EDIT_PROJECTS', 'REQUEST_DELETION', 'VIEW_STATS', 'VIEW_RESALE', 'ADD_RESALE', 'EDIT_RESALE', 'MANAGE_TEAM', 'VIEW_REPORTS', 'ADD_REPORTS', 'EDIT_REPORTS', 'DELETE_REPORTS'],
+    employee: ['VIEW_PROJECTS', 'VIEW_RESALE', 'ADD_PROJECTS', 'EDIT_PROJECTS', 'REQUEST_DELETION', 'VIEW_REPORTS', 'EDIT_REPORTS']
+  };
 
-  app.use(cors());
-  registerHttpMiddleware(app);
-  registerHealthRoutes(app);
+  app.use(express.json({ limit: '500mb' }));
+  app.use(express.urlencoded({ limit: '500mb', extended: true }));
 
-  // Quiet common browser auto-requests that otherwise show as 404 noise.
-  app.get("/favicon.ico", (_req: Request, res: Response) => {
-    res.status(204).end();
-  });
+  // --- Middleware ---
+  function checkPermission(permission: string) { 
+    return async (req: Request, res: Response, next: NextFunction) => {
+      let userRole = '';
+      let userId = '';
+
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.split(' ')[1];
+        try {
+          const decoded = jwt.verify(token, JWT_SECRET) as any;
+          userId = decoded.id;
+          userRole = decoded.role;
+          // Inject so standard backend flow can pick it up
+          req.headers['x-user-id'] = userId;
+          req.headers['x-user-role'] = userRole;
+          if (decoded.username) {
+              req.headers['x-user-name'] = decoded.username;
+          }
+        } catch (err) {
+          return res.status(401).json({ error: "Invalid or expired token" });
+        }
+      } else {
+        // Fallback for previous style requests
+        userRole = (req.headers['x-user-role'] || req.query.role || req.body.role) as string;
+        userId = (req.headers['x-user-id'] || req.query.userId || req.body.userId) as string;
+      }
+      
+      if (!userRole) return res.status(401).json({ error: "Unauthorized: No valid credentials provided" });
+
+      const db = getDb();
+      if (userId) {
+        const u = db?.users.find((u: any) => u.id === userId);
+        if (u) {
+          if (!req.headers['x-user-name']) {
+             req.headers['x-user-name'] = u.name;
+          }
+          u.lastActive = new Date().toISOString();
+          saveDb(db);
+          if (u.permissions && u.permissions.includes(permission)) return next();
+        }
+      }
+
+      const permissions = ROLE_PERMISSIONS[userRole] || [];
+      if (!permissions.includes(permission)) {
+        return res.status(403).json({ error: `Forbidden: Role '${userRole}' does not have '${permission}' permission.` });
+      }
+      next();
+    };
+  }
+
+  async function requireAuth(req: Request, res: Response, next: NextFunction) {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET) as any;
+        req.headers['x-user-id'] = decoded.id;
+        req.headers['x-user-role'] = decoded.role;
+        
+        const db = getDb();
+        const u = db?.users.find((u: any) => u.id === decoded.id);
+        if (u) {
+          req.headers['x-user-name'] = u.name;
+        } else {
+          return res.status(401).json({ error: "User not found" });
+        }
+        return next();
+      } catch (err) {
+        return res.status(401).json({ error: "Invalid or expired token" });
+      }
+    }
+    
+    // Fallback for previous style requests
+    if (req.headers['x-user-name'] || req.headers['x-user-id']) {
+      return next();
+    }
+    
+    return res.status(401).json({ error: "Unauthorized: No token provided" });
+  }
 
   // --- Database Explorer API ---
-  app.get('/api/database/tables', (req, res) => {
+  app.get('/api/database/tables', checkPermission('VIEW_STATS'), (req, res) => {
     const db = getDb();
     if (!db) {
        res.status(500).json({ error: "Database not initialized" });
@@ -49,7 +125,7 @@ async function startServer() {
     res.json(tables);
   });
 
-  app.get('/api/database/tables/:table', (req, res) => {
+  app.get('/api/database/tables/:table', checkPermission('VIEW_STATS'), (req, res) => {
     const db = getDb();
     if (!db) {
        res.status(500).json({ error: "Database not initialized" });
@@ -65,7 +141,7 @@ async function startServer() {
 
   // Enable CORS for public API
   const publicCors = cors({
-    origin: serverConfig.publicApiCorsOrigin,
+    origin: '*',
     methods: ['GET'],
     allowedHeaders: ['x-api-key']
   });
@@ -129,67 +205,162 @@ async function startServer() {
 
   const seedProjects = async () => {
     const db = getDb();
-    if (!db || db.projects.length > 0) return;
+    if (!db) return;
 
-    console.log("Seeding initial projects...");
-    
     const projectData = [
       // DLF (5)
-      { title: 'DLF The Arbour', builder: 'DLF', location: 'Sector 63, Gurgaon', type: 'Apartment', config: '4 BHK', price: 75000000, area: '3956 sqft', images: [{ name: 'DLF_Arbour_Main.jpg', size: 1500000, data: 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=1920&q=80' }] },
-      { title: 'DLF The Ultima', builder: 'DLF', location: 'Sector 81, Gurgaon', type: 'Apartment', config: '3 BHK', price: 25000000, area: '2100 sqft' },
-      { title: 'DLF The Crest', builder: 'DLF', location: 'Sector 54, Gurgaon', type: 'Apartment', config: '4 BHK', price: 85000000, area: '3500 sqft', images: [{ name: 'DLF_The_Crest_Main.jpg', size: 1800000, data: 'https://images.unsplash.com/photo-1582407947304-fd86f028f716?auto=format&fit=crop&w=1920&q=80' }] },
-      { title: 'DLF Camellias', builder: 'DLF', location: 'Sector 42, Gurgaon', type: 'Apartment', config: '5 BHK', price: 450000000, area: '7400 sqft' },
-      { title: 'DLF Cyber City', builder: 'DLF', location: 'DLF Phase 2, Gurgaon', type: 'Commercial', config: 'Office Space', price: 120000000, area: '15000 sqft' },
+      { title: 'DLF The Arbour', builder: 'DLF', location: 'Sector 63, Gurgaon', type: 'Apartment', config: '4 BHK', price: 75000000, area: '3956 sqft', coordinates: { lat: 28.3976, lng: 77.0620 }, images: [{ name: 'DLF_Arbour_Main.jpg', size: 1500000, data: 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=1920&q=80' }] },
+      { title: 'DLF The Ultima', builder: 'DLF', location: 'Sector 81, Gurgaon', type: 'Apartment', config: '3 BHK', price: 25000000, area: '2100 sqft', coordinates: { lat: 28.3846, lng: 76.9531 } },
+      { title: 'DLF The Crest', builder: 'DLF', location: 'Sector 54, Gurgaon', type: 'Apartment', config: '4 BHK', price: 85000000, area: '3500 sqft', coordinates: { lat: 28.4312, lng: 77.1005 }, images: [{ name: 'DLF_The_Crest_Main.jpg', size: 1800000, data: 'https://images.unsplash.com/photo-1582407947304-fd86f028f716?auto=format&fit=crop&w=1920&q=80' }] },
+      { title: 'DLF Camellias', builder: 'DLF', location: 'Sector 42, Gurgaon', type: 'Apartment', config: '5 BHK', price: 450000000, area: '7400 sqft', coordinates: { lat: 28.4552, lng: 77.0940 } },
+      { title: 'DLF Cyber City', builder: 'DLF', location: 'DLF Phase 2, Gurgaon', type: 'Commercial', config: 'Office Space', price: 120000000, area: '15000 sqft', coordinates: { lat: 28.4900, lng: 77.0850 } },
       
       // Signature Global (3)
-      { title: 'Signature Global City 37D', builder: 'Signature Global', location: 'Sector 37D, Gurgaon', type: 'Apartment', config: '3 BHK', price: 12000000, area: '1450 sqft' },
-      { title: 'Signature Global Park 4 & 5', builder: 'Signature Global', location: 'Sector 81, Gurgaon', type: 'Apartment', config: '2 BHK', price: 8500000, area: '1080 sqft' },
-      { title: 'Signature Global Prime', builder: 'Signature Global', location: 'Sector 63A, Gurgaon', type: 'Apartment', config: '2 BHK', price: 7500000, area: '950 sqft', images: [{ name: 'Signature_Global_Prime_Aerial.jpg', size: 2100000, data: 'https://images.unsplash.com/photo-1590608897129-79da98d15969?auto=format&fit=crop&w=1920&q=80' }] },
+      { title: 'Signature Global City 37D', builder: 'Signature Global', location: 'Sector 37D, Gurgaon', type: 'Apartment', config: '3 BHK', price: 12000000, area: '1450 sqft', coordinates: { lat: 28.4350, lng: 76.9600 } },
+      { title: 'Signature Global Park 4 & 5', builder: 'Signature Global', location: 'Sector 81, Gurgaon', type: 'Apartment', config: '2 BHK', price: 8500000, area: '1080 sqft', coordinates: { lat: 28.3846, lng: 76.9531 } },
+      { title: 'Signature Global Prime', builder: 'Signature Global', location: 'Sector 63A, Gurgaon', type: 'Apartment', config: '2 BHK', price: 7500000, area: '950 sqft', coordinates: { lat: 28.4000, lng: 77.0700 }, images: [{ name: 'Signature_Global_Prime_Aerial.jpg', size: 2100000, data: 'https://images.unsplash.com/photo-1590608897129-79da98d15969?auto=format&fit=crop&w=1920&q=80' }] },
       
       // M3M (4)
-      { title: 'M3M Golfestate', builder: 'M3M', location: 'Sector 65, Gurgaon', type: 'Apartment', config: '4 BHK', price: 65000000, area: '3800 sqft' },
-      { title: 'M3M Merlin', builder: 'M3M', location: 'Sector 67, Gurgaon', type: 'Apartment', config: '3 BHK', price: 28000000, area: '2400 sqft' },
-      { title: 'M3M Woodshire', builder: 'M3M', location: 'Sector 107, Gurgaon', type: 'Apartment', config: '3 BHK', price: 18000000, area: '1900 sqft' },
-      { title: 'M3M Marina', builder: 'M3M', location: 'Sector 68, Gurgaon', type: 'Apartment', config: '2 BHK', price: 14000000, area: '1300 sqft' },
+      { title: 'M3M Golfestate', builder: 'M3M', location: 'Sector 65, Gurgaon', type: 'Apartment', config: '4 BHK', price: 65000000, area: '3800 sqft', coordinates: { lat: 28.3900, lng: 77.0650 } },
+      { title: 'M3M Merlin', builder: 'M3M', location: 'Sector 67, Gurgaon', type: 'Apartment', config: '3 BHK', price: 28000000, area: '2400 sqft', coordinates: { lat: 28.3850, lng: 77.0600 } },
+      { title: 'M3M Woodshire', builder: 'M3M', location: 'Sector 107, Gurgaon', type: 'Apartment', config: '3 BHK', price: 18000000, area: '1900 sqft', coordinates: { lat: 28.5100, lng: 77.0000 } },
+      { title: 'M3M Marina', builder: 'M3M', location: 'Sector 68, Gurgaon', type: 'Apartment', config: '2 BHK', price: 14000000, area: '1300 sqft', coordinates: { lat: 28.3800, lng: 77.0500 } },
       
       // Godrej Properties (2)
-      { title: 'Godrej Aria', builder: 'Godrej Properties', location: 'Sector 79, Gurgaon', type: 'Apartment', config: '3 BHK', price: 22000000, area: '2200 sqft' },
-      { title: 'Godrej Frontier', builder: 'Godrej Properties', location: 'Sector 80, Gurgaon', type: 'Apartment', config: '4 BHK', price: 32000000, area: '3100 sqft' }
+      { title: 'Godrej Aria', builder: 'Godrej Properties', location: 'Sector 79, Gurgaon', type: 'Apartment', config: '3 BHK', price: 22000000, area: '2200 sqft', coordinates: { lat: 28.3700, lng: 76.9700 } },
+      { title: 'Godrej Frontier', builder: 'Godrej Properties', location: 'Sector 80, Gurgaon', type: 'Apartment', config: '4 BHK', price: 32000000, area: '3100 sqft', coordinates: { lat: 28.3650, lng: 76.9650 } }
     ];
 
-    const initialProjects: any[] = projectData.map((p, idx) => ({
-      id: `p${idx + 1}`,
-      title: p.title,
-      type: p.type,
-      configuration: p.config,
-      possessionStatus: ['Ready to Move', 'Under Construction', 'New Launch'][Math.floor(Math.random() * 3)],
-      price: p.price,
-      location: p.location,
-      status: 'Active',
-      area: p.area,
-      bathrooms: String(Math.floor(Math.random() * 2) + 2),
-      builderName: p.builder,
-      projectType: p.type === 'Commercial' ? 'Commercial' : 'Residential',
-      pdfs: [],
-      images: (p as any).images || [],
-      createdAt: new Date().toISOString(),
-      assignedTo: 'Super Admin'
-    }));
+    const currentTitles = new Set(db.projects.map((p: any) => p.title));
+    const missingProjectsData = projectData.filter(p => !currentTitles.has(p.title));
+
+    if (missingProjectsData.length === 0) {
+      // Small patch: if projects already exist but don't have coordinates, add them
+      let updated = false;
+      db.projects.forEach((p: any) => {
+        if (!p.coordinates) {
+          const match = projectData.find(pd => pd.title === p.title);
+          if (match) {
+            p.coordinates = match.coordinates;
+            updated = true;
+          }
+        }
+      });
+      if (updated) saveDb(db);
+      return;
+    }
+
+    console.log(`Seeding ${missingProjectsData.length} missing projects...`);
+    
+    let lastSerial = db.lastProjectSerial || db.projects.length;
+    
+    const initialProjects: any[] = missingProjectsData.map((p) => {
+      lastSerial++;
+      return {
+        id: `p${lastSerial}`,
+        title: p.title,
+        type: p.type,
+        configuration: p.config,
+        possessionStatus: ['Ready to Move', 'Under Construction', 'New Launch'][Math.floor(Math.random() * 3)],
+        price: p.price,
+        location: p.location,
+        status: 'Active',
+        area: p.area,
+        bathrooms: String(Math.floor(Math.random() * 2) + 2),
+        builderName: p.builder,
+        projectType: p.type === 'Commercial' ? 'Commercial' : 'Residential',
+        coordinates: p.coordinates,
+        pdfs: [],
+        images: (p as any).images || [],
+        createdAt: new Date().toISOString(),
+        assignedTo: 'Super Admin'
+      };
+    });
 
     db.projects.push(...initialProjects);
-    db.lastProjectSerial = initialProjects.length;
+    db.lastProjectSerial = lastSerial;
     saveDb(db);
     console.log(`${initialProjects.length} projects seeded.`);
   };
 
-  await seedUsers();
-  await seedProjects();
+  const seedResaleProperties = async () => {
+    const db = getDb();
+    if (!db) return;
 
-  // --- Utilities ---
-  const getISTTimestamp = () => {
-    return new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+    if (db.resaleProperties && db.resaleProperties.length > 0) {
+       // Small patch: add coordinates if missing
+       const resaleData = [
+         { society: 'DLF Crest', lat: 28.4312, lng: 77.1005 },
+         { society: 'Emaar Palm Drive', lat: 28.4100, lng: 77.0800 },
+         { society: 'IREO Victory Valley', lat: 28.3900, lng: 77.0700 }
+       ];
+       let updated = false;
+       db.resaleProperties.forEach((p: any) => {
+         if (!p.coordinates) {
+            const match = resaleData.find(rd => p.societyName.includes(rd.society));
+            if (match) {
+              p.coordinates = { lat: match.lat, lng: match.lng };
+              updated = true;
+            } else {
+              // Default to some random offset from Gurgaon center if no match
+              p.coordinates = { lat: 28.4595 + (Math.random() - 0.5) * 0.1, lng: 77.0266 + (Math.random() - 0.5) * 0.1 };
+              updated = true;
+            }
+         }
+       });
+       if (updated) saveDb(db);
+       return;
+    }
+
+    console.log("Seeding initial resale properties...");
+    const initialResale = [
+      {
+        id: 'r1',
+        propertyHolderName: 'John Doe',
+        societyName: 'DLF The Crest',
+        location: 'Sector 54, Gurgaon',
+        builderName: 'DLF',
+        propertyType: 'Apartment',
+        sizeSqft: 3500,
+        bhk: '4 BHK',
+        price: 82000000,
+        isNegotiable: 'YES' as const,
+        floorNumber: '12th',
+        propertyAge: '2 Years',
+        coordinates: { lat: 28.4312, lng: 77.1005 },
+        brokeragePercentage: 1,
+        status: 'Active' as const,
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'r2',
+        propertyHolderName: 'Jane Smith',
+        societyName: 'Emaar Palm Drive',
+        location: 'Sector 66, Gurgaon',
+        builderName: 'Emaar',
+        propertyType: 'Apartment',
+        sizeSqft: 2200,
+        bhk: '3 BHK',
+        price: 35000000,
+        isNegotiable: 'NO' as const,
+        floorNumber: '5th',
+        propertyAge: '5 Years',
+        coordinates: { lat: 28.4100, lng: 77.0800 },
+        brokeragePercentage: 1.5,
+        status: 'Active' as const,
+        createdAt: new Date().toISOString()
+      }
+    ];
+    db.resaleProperties = initialResale;
+    saveDb(db);
+    console.log("Resale properties seeded.");
   };
 
+  await seedUsers();
+  await seedProjects();
+  await seedResaleProperties();
+
+  // --- Utilities ---
   const generateUsername = async (name: string) => {
     const parts = name.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(' ');
     const first = parts[0] || 'user';
@@ -261,25 +432,30 @@ async function startServer() {
   const createNotification = async (userId: string | null, title: string, message: string, type: 'info' | 'success' | 'warning' = 'info') => {
     const db = getDb();
     if (!db) return;
-    
-    const notification = {
+
+    const notif = {
       id: Math.random().toString(36).substr(2, 9),
       userId,
       title,
       message,
       type,
-      read: false,
-      timestamp: getISTTimestamp()
+      readBy: [],
+      createdAt: new Date().toISOString()
     };
-
-    if (type === 'success' || type === 'warning' || title.includes('Approval')) {
-      db.notifications.unshift(notification);
-      // Keep only last 50 notifications
-      if (db.notifications.length > 50) db.notifications.pop();
-      saveDb(db, 'notifications');
-    }
     
-    broadcastEvent({ type: 'NEW_NOTIFICATION', notification });
+    if (!db.notifications) {
+      db.notifications = [];
+    }
+    db.notifications.push(notif);
+    saveDb(db);
+    
+    clients.forEach(client => {
+      try {
+        client.write(`data: ${JSON.stringify({ type: 'NEW_NOTIFICATION', notification: notif })}\n\n`);
+      } catch (err) {
+        console.error("Error broadcasting notification:", err);
+      }
+    });
   };
 
   const createLog = async (action: string, user: string, summary: string) => {
@@ -291,19 +467,11 @@ async function startServer() {
       action,
       user,
       summary,
-      timestamp: getISTTimestamp()
+      timestamp: new Date().toISOString()
     };
     
-    // Save to in-memory for frontend
     db.logs.push(log);
-    
-    // Save to SQLite with structured columns for Prisma Studio
-    try {
-      const stmt = sqlite_db.prepare(`INSERT OR REPLACE INTO logs (id, action, user, summary, timestamp, data) VALUES (?, ?, ?, ?, ?, ?)`);
-      stmt.run(log.id, log.action, log.user, log.summary, log.timestamp, JSON.stringify(log));
-    } catch (err) {
-      console.error("Error writing structured log:", err);
-    }
+    saveDb(db);
     
     broadcastLog(log);
     return log;
@@ -320,9 +488,9 @@ async function startServer() {
     return user ? user.email : null;
   };
 
-  projectController.setDependencies(createLog, createNotification, getAdminEmails, sendNewProjectNotification, sendStatusUpdateNotification, getUserEmail, broadcastEvent);
-  resalePropertyController.setDependencies(createLog, createNotification, getAdminEmails, sendNewProjectNotification, sendStatusUpdateNotification, getUserEmail, broadcastEvent);
-  reportController.setDependencies(createLog, broadcastEvent);
+  projectController.setDependencies(createLog, createNotification, getAdminEmails, sendNewProjectNotification, sendStatusUpdateNotification, getUserEmail);
+  resalePropertyController.setDependencies(createLog, createNotification, getAdminEmails, sendNewProjectNotification, sendStatusUpdateNotification, getUserEmail);
+  reportController.setDependencies(createLog);
 
   // --- Authentication API ---
 
@@ -361,11 +529,17 @@ async function startServer() {
       };
       
       db.users.push(newUser);
-      saveDb(db, 'users');
+      saveDb(db);
       
       await createLog('SIGNUP', name, `User signed up: ${email}`);
 
-      res.status(201).json({ id: newUser.id, name, email, role });
+      const token = jwt.sign(
+        { id: newUser.id, username: newUser.username, role: newUser.role },
+        JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+
+      res.status(201).json({ id: newUser.id, name, email, role, token });
     } catch (err: any) {
       next(err);
     }
@@ -404,6 +578,7 @@ async function startServer() {
 
       loginAttempts.delete(email);
 
+      /* 
       if (user.role === 'admin') {
         const now = new Date();
         const oneMinuteAgo = new Date(now.getTime() - 60000);
@@ -417,21 +592,45 @@ async function startServer() {
           return res.status(403).json({ error: "Another administrator is currently logged in. Only one active admin session is allowed globally." });
         }
       }
+      */
 
       user.lastActive = new Date().toISOString();
-
-      // Always merge stored custom permissions with the latest role-based permissions
-      // so new default permissions are picked up without a manual DB migration
-      const roleDefaults = ROLE_PERMISSIONS[user.role] || [];
-      const customPerms = (user.permissions || []).filter((p: string) => !roleDefaults.includes(p));
-      user.permissions = [...roleDefaults, ...customPerms];
-
-      saveDb(db, 'users');
+      saveDb(db);
       
       await createLog('LOGIN', user.name, `User logged in: ${user.email}`);
 
+      const token = jwt.sign(
+        { id: user.id, username: user.username, role: user.role },
+        JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+
       const { passwordHash: _, ...userWithoutPassword } = user;
-      res.json(userWithoutPassword);
+      res.json({ user: userWithoutPassword, token });
+    } catch (err: any) {
+      next(err);
+    }
+  });
+
+  // Logout
+  app.post("/api/auth/logout", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userName = req.headers['x-user-name'] as string || 'User';
+      const userId = req.headers['x-user-id'] as string;
+      const db = getDb();
+      if (db && userId) {
+        const user = db.users.find((u: any) => u.id === userId);
+        if (user) {
+          user.lastActive = null;
+          saveDb(db);
+          await createLog('LOGOUT', user.name, `User logged out: ${user.email}`);
+        } else {
+          await createLog('LOGOUT', userName, `User logged out`);
+        }
+      } else {
+        await createLog('LOGOUT', userName, `User logged out`);
+      }
+      res.json({ success: true, message: "Logged out successfully" });
     } catch (err: any) {
       next(err);
     }
@@ -502,6 +701,16 @@ async function startServer() {
 
   // --- SSE Endpoint ---
   app.get("/api/stream", (req: Request, res: Response) => {
+    const token = req.query.token as string;
+    if (!token) {
+      return res.status(401).end();
+    }
+    try {
+      jwt.verify(token, JWT_SECRET);
+    } catch (err) {
+      return res.status(401).end();
+    }
+
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -510,44 +719,12 @@ async function startServer() {
     clients.push(res);
     const heartbeat = setInterval(() => {
       res.write(': heartbeat\n\n');
-    }, 30000);
+    }, 15000);
     req.on('close', () => {
       clearInterval(heartbeat);
       clients = clients.filter(client => client !== res);
     });
   });
-
-  // --- Middleware ---
-  const checkPermission = (permission: string) => async (req: Request, res: Response, next: NextFunction) => {
-    const userRole = (req.headers['x-user-role'] || req.query.role || req.body.role) as string;
-    const userId = (req.headers['x-user-id'] || req.query.userId || req.body.userId) as string;
-    
-    if (!userRole) return res.status(401).json({ error: "Unauthorized: No user role provided" });
-
-    const db = getDb();
-    if (userId) {
-      const u = db?.users.find((u: any) => u.id === userId);
-      if (u) {
-        const now = new Date();
-        const lastUpdate = u.lastActive ? new Date(u.lastActive) : new Date(0);
-        // Throttle database updates for lastActive to once every 5 minutes
-        if (now.getTime() - lastUpdate.getTime() > 300000) {
-          u.lastActive = now.toISOString();
-          saveDb(db, 'users');
-        } else {
-          // Update in-memory only
-          u.lastActive = now.toISOString();
-        }
-        if (u.permissions && u.permissions.includes(permission)) return next();
-      }
-    }
-
-    const permissions = ROLE_PERMISSIONS[userRole] || [];
-    if (!permissions.includes(permission)) {
-      return res.status(403).json({ error: `Forbidden: Role '${userRole}' does not have '${permission}' permission.` });
-    }
-    next();
-  };
 
   // --- Background Tasks ---
   const checkProjectStatusUpdates = async () => {
@@ -557,7 +734,7 @@ async function startServer() {
       const now = new Date();
       let updatedCount = 0;
       
-      db.projects.forEach(async (project: any) => {
+      for (const project of db.projects) {
         if (project.possessionStatus === 'New Launch' && project.launchDate) {
           const launchDate = new Date(project.launchDate);
           const diffMonths = (now.getFullYear() - launchDate.getFullYear()) * 12 + (now.getMonth() - launchDate.getMonth());
@@ -570,10 +747,10 @@ async function startServer() {
             await createNotification(null, 'Project Status Updated', `Project "${project.title}" is now Under Construction.`, 'info');
           }
         }
-      });
+      }
 
       if (updatedCount > 0) {
-        saveDb(db, 'projects');
+        saveDb(db);
         broadcastEvent({ type: 'PROJECTS_UPDATED' });
       }
     } catch (error: any) {
@@ -623,18 +800,10 @@ async function startServer() {
     if (permissions.includes('DELETE_PROJECTS')) {
       db.projects = db.projects.filter((p: any) => p.id !== id);
       db.approvals = db.approvals.filter((a: any) => a.projectId !== id);
-      saveDb(db, ['projects', 'approvals']);
+      saveDb(db);
       await createLog('DELETE', userName || 'Admin', `Permanently deleted project: ${proj.title}`);
-      broadcastEvent({ type: 'PROJECTS_UPDATED' });
-      broadcastEvent({ type: 'APPROVALS_UPDATED' });
       res.json({ success: true, deleted: true });
     } else if (permissions.includes('REQUEST_DELETION')) {
-      // Prevent duplicate pending requests
-      const existingPending = db.approvals.find((a: any) => a.projectId === id && a.status === 'Pending');
-      if (existingPending) {
-        return res.json({ success: true, pending: true, message: "A deletion request is already pending for this project." });
-      }
-
       proj.status = 'PENDING_DELETE';
       const approvalReq = {
         id: Math.random().toString(36).substr(2, 9),
@@ -645,7 +814,7 @@ async function startServer() {
         status: 'Pending'
       };
       db.approvals.push(approvalReq);
-      saveDb(db, ['projects', 'approvals']);
+      saveDb(db);
       await createLog('DELETE_REQ', userName || 'Employee', `Requested deletion for project: ${proj.title}`);
       
       // Send email notification to admins
@@ -654,8 +823,6 @@ async function startServer() {
         await sendApprovalRequestNotification('Project Deletion', userName || 'Employee', adminEmails);
       }
       
-      broadcastEvent({ type: 'PROJECTS_UPDATED' });
-      broadcastEvent({ type: 'APPROVALS_UPDATED' });
       res.json({ success: true, pending: true });
     } else {
       res.status(403).json({ error: "Forbidden: Insufficient permissions" });
@@ -684,7 +851,7 @@ async function startServer() {
       };
       
       db.reports.push(newReport);
-      saveDb(db, 'reports');
+      saveDb(db);
       
       await createLog('REPORT_CREATE', userName || 'System', `Created report: ${newReport.title}`);
       broadcastEvent({ type: 'REPORT_CREATED', report : newReport });
@@ -702,7 +869,7 @@ async function startServer() {
       if (index === -1) return res.status(404).json({ error: "Report not found" });
       
       db.reports[index] = { ...db.reports[index], ...updateData, updatedAt: new Date().toISOString() };
-      saveDb(db, 'reports');
+      saveDb(db);
       
       const updated = db.reports[index];
       await createLog('REPORT_UPDATE', userName || 'System', `Updated report: ${updated.title}`);
@@ -721,7 +888,7 @@ async function startServer() {
       if (!report) return res.status(404).json({ error: "Report not found" });
       
       db.reports = db.reports.filter((r: any) => r.id !== id);
-      saveDb(db, 'reports');
+      saveDb(db);
       
       await createLog('REPORT_DELETE', userName || 'System', `Deleted report: ${report.title}`);
       broadcastEvent({ type: 'REPORT_DELETED', reportId: id });
@@ -731,7 +898,7 @@ async function startServer() {
     }
   });
 
-  app.get("/api/notifications", async (req: Request, res: Response) => {
+  app.get("/api/notifications", requireAuth, async (req: Request, res: Response) => {
     const userName = req.headers['x-user-name'] as string;
     if (!userName) return res.status(400).json({ error: "Missing x-user-name header" });
     const db = getDb();
@@ -741,7 +908,7 @@ async function startServer() {
     res.json(userNotifs);
   });
 
-  app.post("/api/notifications/:id/read", async (req: Request, res: Response) => {
+  app.post("/api/notifications/:id/read", requireAuth, async (req: Request, res: Response) => {
     const { id } = req.params;
     const userName = req.headers['x-user-name'] as string;
     const db = getDb();
@@ -749,12 +916,12 @@ async function startServer() {
     const notif = notifications.find((n: any) => n.id === id);
     if (notif && !notif.readBy.includes(userName)) {
       notif.readBy.push(userName);
-      saveDb(db, 'notifications');
+      saveDb(db);
     }
     res.json({ success: true });
   });
 
-  app.post("/api/notifications/read-all", async (req: Request, res: Response) => {
+  app.post("/api/notifications/read-all", requireAuth, async (req: Request, res: Response) => {
     const userName = req.headers['x-user-name'] as string;
     const db = getDb();
     const notifications = db.notifications || [];
@@ -788,13 +955,6 @@ async function startServer() {
       if (requesterEmail) {
         await sendStatusUpdateNotification('Project', approval.projectTitle, 'Deleted', requesterEmail);
       }
-
-      // Mark all other pending requests for the same project as Approved/Cleaned
-      db.approvals.forEach((a: any) => {
-        if (a.projectId === approval.projectId && a.status === 'Pending' && a.id !== id) {
-          a.status = 'Approved';
-        }
-      });
     } else {
       const proj = db.projects.find((p: any) => p.id === approval.projectId);
       if (proj) proj.status = 'Active';
@@ -805,22 +965,13 @@ async function startServer() {
       if (requesterEmail) {
         await sendStatusUpdateNotification('Project', approval.projectTitle, 'Active (Deletion Rejected)', requesterEmail);
       }
-
-      // Mark all other pending requests for the same project as Rejected
-      db.approvals.forEach((a: any) => {
-        if (a.projectId === approval.projectId && a.status === 'Pending' && a.id !== id) {
-          a.status = 'Rejected';
-        }
-      });
     }
     approval.status = action === 'approve' ? 'Approved' : 'Rejected';
-    saveDb(db, ['approvals', 'projects']);
-    broadcastEvent({ type: 'PROJECTS_UPDATED' });
-    broadcastEvent({ type: 'APPROVALS_UPDATED' });
+    saveDb(db);
     res.json({ success: true });
   });
 
-  app.get("/api/users", async (req: Request, res: Response) => {
+  app.get("/api/users", requireAuth, async (req: Request, res: Response) => {
     const userId = req.headers['x-user-id'] as string;
     const userRole = req.headers['x-user-role'] as string;
     const db = getDb();
@@ -919,6 +1070,27 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  app.post("/api/users/:id/reset-credentials", checkPermission('MANAGE_USERS'), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { id } = req.params;
+      const db = getDb();
+      const user = db.users.find((u: any) => u.id === id);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const tempPassword = crypto.randomBytes(8).toString('hex') + "A1!";
+      const passHash = await bcrypt.hash(tempPassword, 10);
+      user.passwordHash = passHash;
+      user.mustResetPassword = true;
+      user.updatedAt = new Date().toISOString();
+      saveDb(db);
+      
+      const adminName = req.header('x-user-name') || 'Admin';
+      await createLog('SECURITY_UPDATE', adminName, `Reset credentials for user ${user.email}`);
+
+      res.json({ message: "Credentials reset successfully", credentials: { username: user.username, password: tempPassword } });
+    } catch (err: any) { next(err); }
+  });
+
   app.patch("/api/users/:id", async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
@@ -998,10 +1170,13 @@ async function startServer() {
     });
   });
 
-  app.use(globalErrorHandler);
+  app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  });
 
   // Vite middleware for development
-  if (!isProduction) {
+  if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -1027,16 +1202,8 @@ async function startServer() {
     }
   }
 
-  const server = createServer(app);
-  registerServerLifecycle(server);
-
-  server.listen(serverConfig.port, serverConfig.host, () => {
-    logger.info("server_started", {
-      appName: serverConfig.appName,
-      host: serverConfig.host,
-      port: serverConfig.port,
-      env: serverConfig.nodeEnv,
-    });
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`pySync Server running on http://localhost:${PORT}`);
   });
 }
 
