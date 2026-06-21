@@ -1,6 +1,56 @@
 import { Request, Response } from 'express';
 import { ResalePropertyRepository } from '../repositories/ResalePropertyRepository';
 import { ResaleProperty } from '../models/ResaleProperty';
+import { uploadFileToCdn } from '../services/minioService';
+
+async function processResaleFiles(property: any) {
+  if (property.images && Array.isArray(property.images)) {
+    property.images = await Promise.all(
+      property.images.map(async (img: any, idx: number) => {
+        if (img && img.data && img.data.startsWith('data:')) {
+          const uploadedUrl = await uploadFileToCdn(img.data, img.name || `image_${idx}`);
+          return { ...img, data: uploadedUrl };
+        }
+        return img;
+      })
+    );
+  }
+  if (property.floorPlan && Array.isArray(property.floorPlan)) {
+    property.floorPlan = await Promise.all(
+      property.floorPlan.map(async (pdf: any, idx: number) => {
+        if (pdf && pdf.data && pdf.data.startsWith('data:')) {
+          const uploadedUrl = await uploadFileToCdn(pdf.data, pdf.name || `floorplan_${idx}`);
+          return { ...pdf, data: uploadedUrl };
+        }
+        return pdf;
+      })
+    );
+  }
+  if (property.bhkDetails && typeof property.bhkDetails === 'object') {
+    const updatedBhkDetails: Record<string, any> = {};
+    for (const bhk of Object.keys(property.bhkDetails)) {
+      const bhkVal = property.bhkDetails[bhk];
+      if (bhkVal && Array.isArray(bhkVal.floorPlan)) {
+        const updatedFloorPlans = await Promise.all(
+          bhkVal.floorPlan.map(async (img: any, idx: number) => {
+            if (img && img.data && img.data.startsWith('data:')) {
+              const uploadedUrl = await uploadFileToCdn(img.data, img.name || `bhk_${bhk}_floorplan_${idx}`);
+              return { ...img, data: uploadedUrl };
+            }
+            return img;
+          })
+        );
+        updatedBhkDetails[bhk] = {
+          ...bhkVal,
+          floorPlan: updatedFloorPlans
+        };
+      } else {
+        updatedBhkDetails[bhk] = bhkVal;
+      }
+    }
+    property.bhkDetails = updatedBhkDetails;
+  }
+}
 
 export class ResalePropertyController {
   private resalePropertyRepository = new ResalePropertyRepository();
@@ -21,10 +71,59 @@ export class ResalePropertyController {
     this.getUserEmail = getUserEmail;
   }
 
+  /**
+   * @swagger
+   * /api/resale-properties:
+   *   get:
+   *     summary: Get all resale properties
+   *     tags: [Resale Properties]
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: A list of resale properties
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: array
+   *               items:
+   *                 $ref: '#/components/schemas/ResaleProperty'
+   */
   getAll = async (req: Request, res: Response) => {
-    res.json(await this.resalePropertyRepository.findAll());
+    const caller = (req.headers['x-user-name'] || req.query.userName || req.body.userName || 'Admin') as string;
+    const userId = req.headers['x-user-id'] as string;
+    const userRole = req.headers['x-user-role'] as string;
+
+    if (this.createLog) await this.createLog('READ_RESALE', caller, 'Viewed resale properties list', userId);
+    
+    let properties = await this.resalePropertyRepository.findAll();
+    if (userRole !== 'admin') {
+      properties = properties.filter(p => (p as any).createdByUserId === userId);
+    }
+    
+    res.json(properties);
   };
 
+  /**
+   * @swagger
+   * /api/resale-properties:
+   *   post:
+   *     summary: List a new resale property
+   *     tags: [Resale Properties]
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             $ref: '#/components/schemas/ResaleProperty'
+   *     responses:
+   *       201:
+   *         description: Resale property created successfully
+   *       400:
+   *         description: Property already exists or invalid input
+   */
   create = async (req: Request, res: Response) => {
     try {
       const { 
@@ -33,6 +132,9 @@ export class ResalePropertyController {
         floorNumber, propertyAge, floorPlan, images, brokeragePercentage, userName,
         constructionYear, contactNumber, reraNumber, coordinates
       } = req.body;
+      
+      const posterName = (userName || req.headers['x-user-name'] || 'Admin') as string;
+      const userId = req.headers['x-user-id'] as string;
       
       // Duplicate check
       const properties = await this.resalePropertyRepository.findAll();
@@ -55,7 +157,7 @@ export class ResalePropertyController {
         return res.status(400).json({ error: "Invalid numeric values provided for size, price, or brokerage." });
       }
 
-      const newProperty: ResaleProperty = {
+      const newProperty: any = {
         id: Math.random().toString(36).substr(2, 9),
         propertyHolderName,
         societyName,
@@ -77,12 +179,14 @@ export class ResalePropertyController {
         images: images || [],
         brokeragePercentage: parsedBrokeragePercentage,
         status: 'Active',
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        createdByUserId: userId
       };
       
+      await processResaleFiles(newProperty);
       await this.resalePropertyRepository.save(newProperty);
-      if (this.createLog) await this.createLog('CREATE', userName || 'Admin', `Created resale property: ${societyName} by ${propertyHolderName}`);
-      if (this.createNotification) await this.createNotification(null, 'New Resale Property Listed', `${societyName} in ${location} was just listed.`, 'info');
+      if (this.createLog) await this.createLog('CREATE', posterName, `Created resale property: ${societyName} by ${propertyHolderName}`, userId);
+      if (this.createNotification) await this.createNotification(null, 'New Resale Property Listed', `${societyName} in ${location} was just listed.`, 'info', userId);
       
       if (this.sendNewProjectNotification && this.getAdminEmails) {
         const adminEmails = this.getAdminEmails();
@@ -97,15 +201,45 @@ export class ResalePropertyController {
     }
   };
 
+  /**
+   * @swagger
+   * /api/resale-properties/{id}:
+   *   put:
+   *     summary: Update an existing resale property
+   *     tags: [Resale Properties]
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             $ref: '#/components/schemas/ResaleProperty'
+   *     responses:
+   *       200:
+   *         description: Resale property updated successfully
+   *       404:
+   *         description: Resale property not found
+   */
   update = async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
       const { userName, ...updateData } = req.body;
       const oldProperty = await this.resalePropertyRepository.findById(id);
       
+      const editorName = (userName || req.headers['x-user-name'] || 'Admin') as string;
+      const userId = req.headers['x-user-id'] as string;
+      
+      await processResaleFiles(updateData);
       const updated = await this.resalePropertyRepository.update(id, updateData);
       if (!updated) return res.status(404).json({ error: "Resale property not found" });
-      if (this.createLog) await this.createLog('UPDATE', userName || 'Admin', `Updated resale property: ${oldProperty?.societyName}`);
+      if (this.createLog) await this.createLog('UPDATE', editorName, `Updated resale property: ${oldProperty?.societyName}`, userId);
       
       if (oldProperty?.status !== updated.status && this.sendStatusUpdateNotification && this.getUserEmail) {
         if (this.getAdminEmails) {
@@ -122,15 +256,38 @@ export class ResalePropertyController {
     }
   };
 
+  /**
+   * @swagger
+   * /api/resale-properties/{id}:
+   *   delete:
+   *     summary: Delete a resale property
+   *     tags: [Resale Properties]
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *     responses:
+   *       204:
+   *         description: Resale property deleted successfully
+   *       404:
+   *         description: Resale property not found
+   */
   delete = async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-      const { userName } = req.query;
+      const { userName } = req.query as { userName?: string };
       const oldProperty = await this.resalePropertyRepository.findById(id);
       if (!oldProperty) return res.status(404).json({ error: "Resale property not found" });
 
+      const deletorName = (userName || req.headers['x-user-name'] || 'Admin') as string;
+      const userId = req.headers['x-user-id'] as string;
+
       await this.resalePropertyRepository.delete(id);
-      if (this.createLog) await this.createLog('DELETE', (userName as string) || 'Admin', `Deleted resale property: ${oldProperty.societyName}`);
+      if (this.createLog) await this.createLog('DELETE', deletorName, `Deleted resale property: ${oldProperty.societyName}`, userId);
       res.status(204).send();
     } catch (error: any) {
       res.status(400).json({ error: error.message });

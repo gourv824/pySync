@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pysync-cache-v1';
+const CACHE_NAME = 'pysync-cache-v2';
 const urlsToCache = [
   '/',
   '/index.html',
@@ -7,6 +7,7 @@ const urlsToCache = [
 ];
 
 self.addEventListener('install', event => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
@@ -19,29 +20,28 @@ self.addEventListener('fetch', event => {
   // Only intercept GET requests
   if (event.request.method !== 'GET') return;
 
+  // Network-First, falling back to cache
   event.respondWith(
-    caches.match(event.request)
+    fetch(event.request)
       .then(response => {
-        // Return cached version or fetch from network
-        return response || fetch(event.request).then(fetchRes => {
-          // Cache the fetched response if it's a valid response
-          if (!fetchRes || fetchRes.status !== 200 || fetchRes.type !== 'basic') {
-            return fetchRes;
-          }
-          
-          const responseToCache = fetchRes.clone();
-          caches.open(CACHE_NAME)
-            .then(cache => {
-              if (event.request.url.startsWith('http')) {
-                cache.put(event.request, responseToCache);
-              }
-            });
-            
-          return fetchRes;
-        }).catch(() => {
-          // Fallback if offline and nothing in cache
-          // Optionally return a custom offline page here
-        });
+        // If not a valid or success response, don't cache
+        if (!response || response.status !== 200 || response.type !== 'basic') {
+          return response;
+        }
+
+        const responseToCache = response.clone();
+        caches.open(CACHE_NAME)
+          .then(cache => {
+            if (event.request.url.startsWith('http')) {
+              cache.put(event.request, responseToCache);
+            }
+          });
+
+        return response;
+      })
+      .catch(() => {
+        // Fallback to cache if network is unavailable
+        return caches.match(event.request);
       })
   );
 });
@@ -57,6 +57,6 @@ self.addEventListener('activate', event => {
           }
         })
       );
-    })
+    }).then(() => self.clients.claim())
   );
 });

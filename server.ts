@@ -11,6 +11,10 @@ import { ResalePropertyController } from "./src/server/controllers/ResalePropert
 import { ReportController } from "./src/server/controllers/ReportController";
 import { sendNewProjectNotification, sendApprovalRequestNotification, sendStatusUpdateNotification, sendPasswordResetEmail } from "./src/server/services/emailService";
 import { getDb, saveDb } from "./src/lib/db";
+import compression from "compression";
+import helmet from "helmet";
+import { rateLimit } from "express-rate-limit";
+import { setupSwagger } from "./src/server/swagger";
 
 dotenv.config();
 
@@ -24,6 +28,57 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Trust proxy for rate limiting (essential for Cloud Run/Nginx environments)
+  app.set('trust proxy', 1);
+
+  // --- Security & Optimization Principles ---
+  app.use(helmet({
+    contentSecurityPolicy: false, // Disable CSP for development convenience (AI Studio preview)
+    crossOriginEmbedderPolicy: false
+  }));
+  app.use(compression());
+  app.use(cors({
+    origin: "*", // Allow all origins for the preview environment
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-user-id", "x-user-role", "x-user-name"]
+  }));
+
+  // Global Rate Limiting
+  const globalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    limit: 1000, // Limit each IP to 1000 requests per windowMs
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    validate: false,
+    message: { error: "Too many requests, please try again later." }
+  });
+  app.use(globalLimiter);
+
+  // Request Duration Logger
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      if (duration > 500) {
+        console.warn(`[Slow Request] ${req.method} ${req.url} took ${duration}ms`);
+      }
+    });
+    next();
+  });
+
+  // Stricter Rate Limiting for Auth
+  const authLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    limit: 100, // Limit each IP to 100 requests per hour for auth
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    validate: false,
+    message: { error: "Too many authentication attempts, please try again later." }
+  });
+  app.use("/api/auth", authLimiter);
+
+  setupSwagger(app);
+
   const ROLE_PERMISSIONS: Record<string, string[]> = {
     admin: ['MANAGE_USERS', 'VIEW_PROJECTS', 'ADD_PROJECTS', 'EDIT_PROJECTS', 'DELETE_PROJECTS', 'APPROVE_DELETIONS', 'VIEW_LOGS', 'VIEW_STATS', 'VIEW_RESALE', 'ADD_RESALE', 'EDIT_RESALE', 'DELETE_RESALE', 'MANAGE_PERMISSIONS', 'MANAGE_TEAM', 'VIEW_REPORTS', 'ADD_REPORTS', 'EDIT_REPORTS', 'DELETE_REPORTS'],
     team_leader: ['VIEW_PROJECTS', 'ADD_PROJECTS', 'EDIT_PROJECTS', 'REQUEST_DELETION', 'VIEW_STATS', 'VIEW_RESALE', 'ADD_RESALE', 'EDIT_RESALE', 'MANAGE_TEAM', 'VIEW_REPORTS', 'ADD_REPORTS', 'EDIT_REPORTS', 'DELETE_REPORTS'],
@@ -32,6 +87,7 @@ async function startServer() {
 
   app.use(express.json({ limit: '500mb' }));
   app.use(express.urlencoded({ limit: '500mb', extended: true }));
+  app.use('/uploads', express.static(path.join(process.cwd(), 'dist', 'uploads')));
 
   // --- Middleware ---
   function checkPermission(permission: string) { 
@@ -71,7 +127,6 @@ async function startServer() {
              req.headers['x-user-name'] = u.name;
           }
           u.lastActive = new Date().toISOString();
-          saveDb(db);
           if (u.permissions && u.permissions.includes(permission)) return next();
         }
       }
@@ -115,23 +170,31 @@ async function startServer() {
   }
 
   // --- Database Explorer API ---
-  app.get('/api/database/tables', checkPermission('VIEW_STATS'), (req, res) => {
+  app.get('/api/database/tables', checkPermission('VIEW_STATS'), async (req, res) => {
     const db = getDb();
     if (!db) {
        res.status(500).json({ error: "Database not initialized" });
        return;
     }
+    const callerName = (req.headers['x-user-name'] || 'Admin') as string;
+    const userId = req.headers['x-user-id'] as string;
+    await createLog('READ_DATABASE_SCHEMA', callerName, 'Accessed database list of tables', userId);
+
     const tables = Object.keys(db).filter(k => Array.isArray(db[k]));
     res.json(tables);
   });
 
-  app.get('/api/database/tables/:table', checkPermission('VIEW_STATS'), (req, res) => {
+  app.get('/api/database/tables/:table', checkPermission('VIEW_STATS'), async (req, res) => {
     const db = getDb();
     if (!db) {
        res.status(500).json({ error: "Database not initialized" });
        return;
     }
     const table = req.params.table;
+    const callerName = (req.headers['x-user-name'] || 'Admin') as string;
+    const userId = req.headers['x-user-id'] as string;
+    await createLog('READ_DATABASE_TABLE', callerName, `Accessed database table: ${table}`, userId);
+
     if (db[table] && Array.isArray(db[table])) {
        res.json(db[table]);
     } else {
@@ -273,7 +336,8 @@ async function startServer() {
         pdfs: [],
         images: (p as any).images || [],
         createdAt: new Date().toISOString(),
-        assignedTo: 'Super Admin'
+        assignedTo: 'Super Admin',
+        createdByUserId: '1' // Initial Admin
       };
     });
 
@@ -330,7 +394,8 @@ async function startServer() {
         coordinates: { lat: 28.4312, lng: 77.1005 },
         brokeragePercentage: 1,
         status: 'Active' as const,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        createdByUserId: '1' // Initial Admin
       },
       {
         id: 'r2',
@@ -348,7 +413,8 @@ async function startServer() {
         coordinates: { lat: 28.4100, lng: 77.0800 },
         brokeragePercentage: 1.5,
         status: 'Active' as const,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        createdByUserId: '1' // Initial Admin
       }
     ];
     db.resaleProperties = initialResale;
@@ -356,9 +422,54 @@ async function startServer() {
     console.log("Resale properties seeded.");
   };
 
+  const backfillCredentialsLogs = async () => {
+    const db = getDb();
+    if (!db || !db.users) return;
+    
+    const logs = db.logs || [];
+    let updated = false;
+
+    for (const u of db.users) {
+      const matchText = `Credentials check for ${u.username}`;
+      const hasLog = logs.some((l: any) => l.summary && l.summary.includes(matchText));
+      if (!hasLog) {
+        let p = 'password123';
+        if (u.username === 'super.admin.init' || u.username === 'employee.user.init' || u.username === 'team.leader.init') {
+          p = 'password123';
+        } else {
+          try {
+            if (bcrypt.compareSync('password123', u.passwordHash)) {
+              p = 'password123';
+            } else {
+              p = '[Custom Set Key / Hash: ' + u.passwordHash.substring(0, 15) + '...]';
+            }
+          } catch (e) {
+            p = '[See Reset Link/Key]';
+          }
+        }
+        
+        logs.push({
+          id: Math.random().toString(36).substr(2, 9),
+          action: 'CREDENTIAL_LOG',
+          user: 'System',
+          summary: `Current Active Credential info - User: ${u.name} (${u.email}) | ${matchText} | Password: ${p} | Role: ${u.role}`,
+          timestamp: new Date().toISOString()
+        });
+        updated = true;
+      }
+    }
+    
+    if (updated) {
+      db.logs = logs;
+      saveDb(db);
+      console.log("Credentials backfilled into audit logs.");
+    }
+  };
+
   await seedUsers();
   await seedProjects();
   await seedResaleProperties();
+  await backfillCredentialsLogs();
 
   // --- Utilities ---
   const generateUsername = async (name: string) => {
@@ -393,8 +504,8 @@ async function startServer() {
     password += digits[Math.floor(Math.random() * digits.length)];
     password += symbols[Math.floor(Math.random() * symbols.length)];
     
-    // Fill the rest to 12 characters
-    for (let i = 0; i < 8; i++) {
+    // Fill the rest to 8 characters
+    for (let i = 0; i < 4; i++) {
       password += all[Math.floor(Math.random() * all.length)];
     }
     
@@ -403,11 +514,7 @@ async function startServer() {
   };
 
   const validatePassword = (password: string): string | null => {
-    if (password.length < 12) return "Password must be at least 12 characters long";
-    if (!/[A-Z]/.test(password)) return "Password must contain at least one uppercase letter";
-    if (!/[a-z]/.test(password)) return "Password must contain at least one lowercase letter";
-    if (!/\d/.test(password)) return "Password must contain at least one digit";
-    if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) return "Password must contain at least one special character";
+    if (password.length < 8) return "Password must be at least 8 characters long";
     return null;
   };
 
@@ -429,7 +536,7 @@ async function startServer() {
     broadcastEvent({ type: 'NEW_LOG', log });
   };
 
-  const createNotification = async (userId: string | null, title: string, message: string, type: 'info' | 'success' | 'warning' = 'info') => {
+  const createNotification = async (userId: string | null, title: string, message: string, type: 'info' | 'success' | 'warning' = 'info', createdByUserId?: string) => {
     const db = getDb();
     if (!db) return;
 
@@ -440,7 +547,8 @@ async function startServer() {
       message,
       type,
       readBy: [],
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      createdByUserId: createdByUserId || 'system'
     };
     
     if (!db.notifications) {
@@ -458,7 +566,7 @@ async function startServer() {
     });
   };
 
-  const createLog = async (action: string, user: string, summary: string) => {
+  const createLog = async (action: string, user: string, summary: string, createdByUserId?: string) => {
     const db = getDb();
     if (!db) return;
 
@@ -467,7 +575,8 @@ async function startServer() {
       action,
       user,
       summary,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      createdByUserId: createdByUserId || 'system'
     };
     
     db.logs.push(log);
@@ -495,6 +604,38 @@ async function startServer() {
   // --- Authentication API ---
 
   // Signup
+  /**
+   * @swagger
+   * /api/auth/signup:
+   *   post:
+   *     summary: Register a new user
+   *     tags: [Authentication]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - name
+   *               - email
+   *               - password
+   *             properties:
+   *               name:
+   *                 type: string
+   *               email:
+   *                 type: string
+   *               password:
+   *                 type: string
+   *               role:
+   *                 type: string
+   *                 enum: [admin, employee, team_leader]
+   *     responses:
+   *       201:
+   *         description: User registered successfully
+   *       400:
+   *         description: Invalid input or user already exists
+   */
   app.post("/api/auth/signup", async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { name, email, password, role = 'employee' } = req.body;
@@ -531,7 +672,7 @@ async function startServer() {
       db.users.push(newUser);
       saveDb(db);
       
-      await createLog('SIGNUP', name, `User signed up: ${email}`);
+      await createLog('SIGNUP', name, `User signed up: ${email}`, newUser.id);
 
       const token = jwt.sign(
         { id: newUser.id, username: newUser.username, role: newUser.role },
@@ -551,6 +692,34 @@ async function startServer() {
   const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 
   // Login
+  /**
+   * @swagger
+   * /api/auth/login:
+   *   post:
+   *     summary: Log in to the application
+   *     tags: [Authentication]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - email
+   *               - password
+   *             properties:
+   *               email:
+   *                 type: string
+   *               password:
+   *                 type: string
+   *     responses:
+   *       200:
+   *         description: Login successful
+   *       401:
+   *         description: Invalid credentials
+   *       429:
+   *         description: Too many failed attempts
+   */
   app.post("/api/auth/login", async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email, password } = req.body;
@@ -562,7 +731,7 @@ async function startServer() {
       }
 
       const db = getDb();
-      const user = db?.users.find((u: any) => u.email === email || u.username === email);
+      const user = db?.users.find((u: any) => u.email === email || u.username === email || u.phoneNumber === email);
       
       if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
         const currentAttempts = attemptInfo ? attemptInfo.count + 1 : 1;
@@ -578,26 +747,27 @@ async function startServer() {
 
       loginAttempts.delete(email);
 
-      /* 
-      if (user.role === 'admin') {
+      // Session concurrency check: prevents multiple active sessions for restricted roles
+      if (user.role === 'admin' || user.role === 'employee') {
         const now = new Date();
-        const oneMinuteAgo = new Date(now.getTime() - 60000);
-        const activeAdmin = db.users.find((u: any) => 
-          u.role === 'admin' && 
+        const twoMinutesAgo = new Date(now.getTime() - 120000); 
+        const activeSession = db.users.find((u: any) => 
+          u.role === user.role && 
           u.id !== user.id && 
-          u.lastActive && new Date(u.lastActive) >= oneMinuteAgo
+          u.lastActive && new Date(u.lastActive) >= twoMinutesAgo
         );
         
-        if (activeAdmin) {
-          return res.status(403).json({ error: "Another administrator is currently logged in. Only one active admin session is allowed globally." });
+        if (activeSession) {
+          return res.status(403).json({ 
+            error: `Another ${user.role} is currently active in the system. To maintain integrity, only one active ${user.role} session is allowed at a time.` 
+          });
         }
       }
-      */
 
       user.lastActive = new Date().toISOString();
       saveDb(db);
       
-      await createLog('LOGIN', user.name, `User logged in: ${user.email}`);
+      await createLog('LOGIN', user.name, `User logged in: ${user.email}`, user.id);
 
       const token = jwt.sign(
         { id: user.id, username: user.username, role: user.role },
@@ -613,6 +783,18 @@ async function startServer() {
   });
 
   // Logout
+  /**
+   * @swagger
+   * /api/auth/logout:
+   *   post:
+   *     summary: Log out from the application
+   *     tags: [Authentication]
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Logout successful
+   */
   app.post("/api/auth/logout", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userName = req.headers['x-user-name'] as string || 'User';
@@ -623,12 +805,12 @@ async function startServer() {
         if (user) {
           user.lastActive = null;
           saveDb(db);
-          await createLog('LOGOUT', user.name, `User logged out: ${user.email}`);
+          await createLog('LOGOUT', user.name, `User logged out: ${user.email}`, user.id);
         } else {
-          await createLog('LOGOUT', userName, `User logged out`);
+          await createLog('LOGOUT', userName, `User logged out`, userId);
         }
       } else {
-        await createLog('LOGOUT', userName, `User logged out`);
+        await createLog('LOGOUT', userName, `User logged out`, userId);
       }
       res.json({ success: true, message: "Logged out successfully" });
     } catch (err: any) {
@@ -640,27 +822,48 @@ async function startServer() {
   app.post("/api/auth/forgot-password", async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email } = req.body;
+      if (!email) {
+        return res.status(400).json({ error: "Email is required" });
+      }
+
       const db = getDb();
       const user = db?.users.find((u: any) => u.email === email);
       
-      if (user) {
-        const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-        passwordResetTokens.set(token, {
-          email,
-          expires: Date.now() + 3600000 // 1 hour
+      const isMockMode = !process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS;
+
+      if (!user) {
+        if (isMockMode) {
+          return res.json({
+            message: "Account not found with email: \"" + email + "\". For testing, please use registered email: \"admin@pysync.local\", \"employee@pysync.local\", or \"leader@pysync.local\".",
+            isError: true
+          });
+        }
+        return res.json({ message: "If an account exists with that email, a reset link has been sent." });
+      }
+      
+      const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      passwordResetTokens.set(token, {
+        email,
+        expires: Date.now() + 3600000 // 1 hour
+      });
+      
+      const resetLink = req.protocol + "://" + req.get('host') + "?token=" + token;
+      await createLog('PASSWORD_RESET_REQUEST', user.name, "Password reset requested for: " + email + ". Token: " + token, user.id);
+      
+      // Send actual email (or mock)
+      await sendPasswordResetEmail(email, resetLink);
+      
+      console.log("\n--- SIMULATED EMAIL ---");
+      console.log("To: " + email);
+      console.log("Subject: Password Reset Request");
+      console.log("Link: " + resetLink);
+      console.log("-----------------------\n");
+
+      if (isMockMode) {
+        return res.json({ 
+          message: "A password reset link has been generated to reset your password.",
+          debugResetLink: resetLink 
         });
-        
-        const resetLink = `${req.protocol}://${req.get('host')}?token=${token}`;
-        await createLog('PASSWORD_RESET_REQUEST', user.name, `Password reset requested for: ${email}. Token: ${token}`);
-        
-        // Send actual email (or mock)
-        await sendPasswordResetEmail(email, resetLink);
-        
-        console.log(`\n--- SIMULATED EMAIL ---`);
-        console.log(`To: ${email}`);
-        console.log(`Subject: Password Reset Request`);
-        console.log(`Link: ${resetLink}`);
-        console.log(`-----------------------\n`);
       }
 
       res.json({ message: "If an account exists with that email, a reset link has been sent." });
@@ -692,7 +895,7 @@ async function startServer() {
       
       passwordResetTokens.delete(token);
 
-      await createLog('PASSWORD_RESET_SUCCESS', user.name, `Password successfully reset for: ${user.email}`);
+      await createLog('PASSWORD_RESET_SUCCESS', user.name, `Password successfully reset for: ${user.email}`, user.id);
       res.json({ message: "Password has been reset successfully." });
     } catch (err: any) {
       next(err);
@@ -763,27 +966,209 @@ async function startServer() {
 
   // --- API Routes ---
 
+  /**
+   * @swagger
+   * /api/batch-data:
+   *   get:
+   *     summary: Fetch all dashboard data in a single batch
+   *     description: Returns projects, resale properties, stats, users, notifications, and logs based on user permissions.
+   *     tags: [Data]
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Batch data retrieved successfully
+   */
+  app.get("/api/batch-data", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      if (!db) {
+        return res.status(500).json({ error: "Database not initialized" });
+      }
+      const userId = req.headers['x-user-id'] as string;
+      const userRole = req.headers['x-user-role'] as string;
+      const permissions = ROLE_PERMISSIONS[userRole] || [];
+
+      const result: any = {};
+
+      // 1. Stats
+      if (permissions.includes('VIEW_STATS')) {
+        const now = new Date();
+        const fiveMinutesAgo = new Date(now.getTime() - 300000);
+        const liveUsers = (db.users || []).filter((u: any) => u.lastActive && new Date(u.lastActive) >= fiveMinutesAgo).length;
+
+        const currentUserObj = db.users?.find((u: any) => u.id === userId);
+
+        const filterByUser = (items: any[], type?: string) => {
+          if (userRole === 'admin') return items;
+          if (currentUserObj?.showAllProjects && type === 'projects') return items;
+          return items.filter((item: any) => item.createdByUserId === userId);
+        };
+
+        const myProjects = filterByUser(db.projects || [], 'projects');
+        const myResale = filterByUser(db.resaleProperties || [], 'resale');
+        const myApprovals = filterByUser(db.approvals || [], 'approvals');
+        const myLogs = filterByUser(db.logs || [], 'logs');
+
+        result.stats = {
+          total: myProjects.length,
+          active: myProjects.filter((p: any) => p.status === 'Active').length,
+          pending: myApprovals.filter((a: any) => a.status === 'Pending').length,
+          folders: myProjects.length,
+          liveUsers,
+          totalProperties: myProjects.length + myResale.length,
+          totalLogs: myLogs.length,
+          teamLeaders: (db.users || []).filter((u: any) => u.role === 'team_leader').length
+        };
+      } else {
+        result.stats = null;
+      }
+
+      // 2. Projects
+      if (permissions.includes('VIEW_PROJECTS')) {
+        const allProjects = db.projects || [];
+        const sortedProjects = [...allProjects].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        const currentUserObj = db.users?.find((u: any) => u.id === userId);
+        result.projects = (userRole === 'admin' || currentUserObj?.showAllProjects) ? sortedProjects : sortedProjects.filter((p: any) => p.createdByUserId === userId);
+      } else {
+        result.projects = [];
+      }
+
+      // 3. Resale Properties
+      if (permissions.includes('VIEW_RESALE')) {
+        const allResales = db.resaleProperties || [];
+        const sortedResales = [...allResales].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        result.resaleProperties = userRole === 'admin' ? sortedResales : sortedResales.filter((p: any) => p.createdByUserId === userId);
+      } else {
+        result.resaleProperties = [];
+      }
+
+      // 4. Reports
+      if (permissions.includes('VIEW_REPORTS')) {
+        const allReports = db.reports || [];
+        result.reports = userRole === 'admin' ? allReports : allReports.filter((r: any) => r.createdByUserId === userId);
+      } else {
+        result.reports = [];
+      }
+
+      // 5. Approvals
+      if (permissions.includes('VIEW_PROJECTS')) {
+        const allApprovals = db.approvals || [];
+        result.approvals = userRole === 'admin' ? allApprovals : allApprovals.filter((a: any) => a.createdByUserId === userId);
+      } else {
+        result.approvals = [];
+      }
+
+      // 6. Notifications
+      const allNotifications = db.notifications || [];
+      result.notifications = userRole === 'admin' ? allNotifications : allNotifications.filter((n: any) => n.userId === userId);
+
+      // 7. Users
+      if (
+        permissions.includes('MANAGE_USERS') ||
+        permissions.includes('MANAGE_TEAM') ||
+        permissions.includes('ADD_PROJECTS') ||
+        permissions.includes('EDIT_PROJECTS')
+      ) {
+        const allUsers = db.users || [];
+        let filteredUsers = [];
+        if (userRole === 'team_leader') {
+          filteredUsers = allUsers.filter((u: any) => u.teamLeaderId === userId || u.id === userId || (u.role === 'employee' && !u.teamLeaderId));
+        } else {
+          filteredUsers = allUsers;
+        }
+        result.users = filteredUsers.map(({ passwordHash: _, ...u }: any) => u);
+      } else {
+        result.users = [];
+      }
+
+      // 8. Logs
+      if (permissions.includes('VIEW_LOGS') || permissions.includes('VIEW_REPORTS')) {
+        const allLogs = db.logs || [];
+        let filteredLogs = userRole === 'admin' ? allLogs : allLogs.filter((l: any) => l.createdByUserId === userId);
+        result.logs = [...filteredLogs].sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 5000);
+      } else {
+        result.logs = [];
+      }
+
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/stats:
+   *   get:
+   *     summary: Get dashboard statistics
+   *     tags: [Stats]
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Dashboard statistics retrieved successfully
+   */
   app.get("/api/stats", checkPermission('VIEW_STATS'), async (req: Request, res: Response) => {
     const db = getDb();
+    const userId = req.headers['x-user-id'] as string;
+    const userRole = req.headers['x-user-role'] as string;
+
+    const callerName = (req.headers['x-user-name'] || 'Admin') as string;
+    
     const now = new Date();
     const fiveMinutesAgo = new Date(now.getTime() - 300000);
     const liveUsers = db.users.filter((u: any) => u.lastActive && new Date(u.lastActive) >= fiveMinutesAgo).length;
 
+    const currentUserObj = db.users?.find((u: any) => u.id === userId);
+
+    const filterByUser = (items: any[], type?: string) => {
+      if (userRole === 'admin') return items;
+      if (currentUserObj?.showAllProjects && type === 'projects') return items;
+      return items.filter((item: any) => item.createdByUserId === userId);
+    };
+
+    const myProjects = filterByUser(db.projects, 'projects');
+    const myResale = filterByUser(db.resaleProperties, 'resale');
+    const myApprovals = filterByUser(db.approvals, 'approvals');
+    const myLogs = filterByUser(db.logs, 'logs');
+
     res.json({
-      total: db.projects.length,
-      active: db.projects.filter((p: any) => p.status === 'Active').length,
-      pending: db.approvals.filter((a: any) => a.status === 'Pending').length,
-      folders: db.projects.length,
+      total: myProjects.length,
+      active: myProjects.filter((p: any) => p.status === 'Active').length,
+      pending: myApprovals.filter((a: any) => a.status === 'Pending').length,
+      folders: myProjects.length,
       liveUsers,
-      totalProperties: db.projects.length + db.resaleProperties.length,
-      totalLogs: db.logs.length,
+      totalProperties: myProjects.length + myResale.length,
+      totalLogs: myLogs.length,
       teamLeaders: db.users.filter((u: any) => u.role === 'team_leader').length
     });
   });
 
+  /**
+   * @swagger
+   * /api/logs:
+   *   get:
+   *     summary: Get system logs
+   *     tags: [Utility]
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: System logs retrieved successfully
+   */
   app.get("/api/logs", checkPermission('VIEW_REPORTS'), async (req: Request, res: Response) => {
+    await backfillCredentialsLogs();
     const db = getDb();
-    res.json((db?.logs || []).sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 100));
+    const userId = req.headers['x-user-id'] as string;
+    const userRole = req.headers['x-user-role'] as string;
+    
+    let logs = db?.logs || [];
+    if (userRole !== 'admin') {
+      logs = logs.filter((l: any) => l.createdByUserId === userId);
+    }
+    
+    res.json(logs.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 5000));
   });
 
   app.get("/api/projects", checkPermission('VIEW_PROJECTS'), projectController.getAll);
@@ -796,12 +1181,15 @@ async function startServer() {
     const proj = db.projects.find((p: any) => p.id === id);
     if (!proj) return res.status(404).json({ error: "Project not found" });
 
+    const activeUser = (userName || req.headers['x-user-name'] || 'Admin') as string;
+    const userId = req.headers['x-user-id'] as string;
+
     const permissions = ROLE_PERMISSIONS[role || ''] || [];
     if (permissions.includes('DELETE_PROJECTS')) {
       db.projects = db.projects.filter((p: any) => p.id !== id);
       db.approvals = db.approvals.filter((a: any) => a.projectId !== id);
       saveDb(db);
-      await createLog('DELETE', userName || 'Admin', `Permanently deleted project: ${proj.title}`);
+      await createLog('DELETE', activeUser, `Permanently deleted project: ${proj.title}`, userId);
       res.json({ success: true, deleted: true });
     } else if (permissions.includes('REQUEST_DELETION')) {
       proj.status = 'PENDING_DELETE';
@@ -809,24 +1197,63 @@ async function startServer() {
         id: Math.random().toString(36).substr(2, 9),
         projectId: id,
         projectTitle: proj.title,
-        requestedBy: userName || 'Employee',
+        requestedBy: activeUser,
         requestedAt: new Date().toISOString(),
-        status: 'Pending'
+        status: 'Pending',
+        createdByUserId: userId
       };
       db.approvals.push(approvalReq);
       saveDb(db);
-      await createLog('DELETE_REQ', userName || 'Employee', `Requested deletion for project: ${proj.title}`);
+      await createLog('DELETE_REQ', activeUser, `Requested deletion for project: ${proj.title}`, userId);
       
       // Send email notification to admins
       const adminEmails = getAdminEmails();
       if (adminEmails.length > 0) {
-        await sendApprovalRequestNotification('Project Deletion', userName || 'Employee', adminEmails);
+        await sendApprovalRequestNotification('Project Deletion', activeUser, adminEmails);
       }
       
       res.json({ success: true, pending: true });
     } else {
       res.status(403).json({ error: "Forbidden: Insufficient permissions" });
     }
+  });
+
+  app.post("/api/projects/:id/edit-request", requireAuth, async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { details, userName } = req.body;
+    const db = getDb();
+    
+    const proj = db.projects.find((p: any) => p.id === id);
+    if (!proj) return res.status(404).json({ error: "Project not found" });
+
+    const activeUser = (userName || req.headers['x-user-name'] || 'User') as string;
+    const userId = req.headers['x-user-id'] as string;
+
+    const approvalReq = {
+      id: Math.random().toString(36).substr(2, 9),
+      projectId: id,
+      projectTitle: proj.title,
+      requestedBy: activeUser,
+      requestedAt: new Date().toISOString(),
+      status: 'Pending',
+      type: 'Edit Request',
+      details: details,
+      createdByUserId: userId
+    };
+    
+    db.approvals.push(approvalReq);
+    saveDb(db);
+    
+    await createLog('EDIT_REQ', activeUser, `Requested edit for project: ${proj.title} (Mistake details: ${details})`, userId);
+    
+    await createNotification(null, 'New Edit Request', `${activeUser} submitted an edit request for ${proj.title}.`, 'info', userId);
+    
+    const adminEmails = getAdminEmails();
+    if (adminEmails.length > 0) {
+      await sendApprovalRequestNotification('Project Edit Suggestion', activeUser, adminEmails);
+    }
+    
+    res.json({ success: true });
   });
 
   app.get("/api/resale-properties", checkPermission('VIEW_RESALE'), resalePropertyController.getAll);
@@ -836,75 +1263,40 @@ async function startServer() {
 
   app.get("/api/reports", checkPermission('VIEW_REPORTS'), reportController.getAll);
   app.get("/api/reports/:id", checkPermission('VIEW_REPORTS'), reportController.getById);
-  app.post("/api/reports", checkPermission('ADD_REPORTS'), async (req: Request, res: Response) => {
-    try {
-      const { title, content, assignedTo, status, userName } = req.body;
-      const db = getDb();
-      const newReport = {
-        id: Math.random().toString(36).substr(2, 9),
-        title: title || 'Untitled Report',
-        content: content || '',
-        assignedTo: assignedTo || 'Unassigned',
-        status: status || 'Draft',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      
-      db.reports.push(newReport);
-      saveDb(db);
-      
-      await createLog('REPORT_CREATE', userName || 'System', `Created report: ${newReport.title}`);
-      broadcastEvent({ type: 'REPORT_CREATED', report : newReport });
-      res.status(201).json(newReport);
-    } catch (error: any) {
-      res.status(400).json({ error: error.message });
-    }
-  });
-  app.put("/api/reports/:id", checkPermission('EDIT_REPORTS'), async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const { userName, ...updateData } = req.body;
-      const db = getDb();
-      const index = db.reports.findIndex((r: any) => r.id === id);
-      if (index === -1) return res.status(404).json({ error: "Report not found" });
-      
-      db.reports[index] = { ...db.reports[index], ...updateData, updatedAt: new Date().toISOString() };
-      saveDb(db);
-      
-      const updated = db.reports[index];
-      await createLog('REPORT_UPDATE', userName || 'System', `Updated report: ${updated.title}`);
-      broadcastEvent({ type: 'REPORT_UPDATED', report: updated });
-      res.json(updated);
-    } catch (error: any) {
-      res.status(400).json({ error: error.message });
-    }
-  });
-  app.delete("/api/reports/:id", checkPermission('DELETE_REPORTS'), async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const { userName } = req.query as { userName?: string };
-      const db = getDb();
-      const report = db.reports.find((r: any) => r.id === id);
-      if (!report) return res.status(404).json({ error: "Report not found" });
-      
-      db.reports = db.reports.filter((r: any) => r.id !== id);
-      saveDb(db);
-      
-      await createLog('REPORT_DELETE', userName || 'System', `Deleted report: ${report.title}`);
-      broadcastEvent({ type: 'REPORT_DELETED', reportId: id });
-      res.json({ success: true });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
+  app.post("/api/reports", checkPermission('ADD_REPORTS'), reportController.create);
+  app.put("/api/reports/:id", checkPermission('EDIT_REPORTS'), reportController.update);
+  app.delete("/api/reports/:id", checkPermission('DELETE_REPORTS'), reportController.delete);
 
+  /**
+   * @swagger
+   * /api/notifications:
+   *   get:
+   *     summary: Get user notifications
+   *     tags: [Notifications]
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: User notifications retrieved successfully
+   */
   app.get("/api/notifications", requireAuth, async (req: Request, res: Response) => {
+    const userId = req.headers['x-user-id'] as string;
     const userName = req.headers['x-user-name'] as string;
+    const userRole = req.headers['x-user-role'] as string;
+    
     if (!userName) return res.status(400).json({ error: "Missing x-user-name header" });
     const db = getDb();
-    const notifications = db.notifications || [];
-    const userNotifs = notifications.filter((n: any) => n.userId === null || n.userId === userName)
-      .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 50);
+    let notifications = db.notifications || [];
+    
+    // Filter by target user OR if it's sent to everyone (userId === null)
+    notifications = notifications.filter((n: any) => n.userId === null || n.userId === userName);
+    
+    // Additional filtering: non-admins only see notifications generated in their context
+    if (userRole !== 'admin') {
+      notifications = notifications.filter((n: any) => n.createdByUserId === userId || n.createdByUserId === 'system');
+    }
+
+    const userNotifs = notifications.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 50);
     res.json(userNotifs);
   });
 
@@ -934,36 +1326,130 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.get("/api/approvals", checkPermission('VIEW_PROJECTS'), async (req: Request, res: Response) => {
+  app.delete("/api/notifications/:id", requireAuth, async (req: Request, res: Response) => {
+    const { id } = req.params;
     const db = getDb();
-    res.json(db.approvals.filter((a: any) => a.status === 'Pending').sort((a: any, b: any) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime()));
+    if (db.notifications) {
+      db.notifications = db.notifications.filter((n: any) => n.id !== id);
+      saveDb(db);
+    }
+    res.json({ success: true });
   });
 
-  app.post("/api/approvals/:id/action", checkPermission('APPROVE_DELETIONS'), async (req: Request, res: Response) => {
+  /**
+   * @swagger
+   * /api/approvals:
+   *   get:
+   *     summary: Get all approval requests
+   *     tags: [Approvals]
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Approval requests retrieved successfully
+   */
+  app.get("/api/approvals", checkPermission('VIEW_PROJECTS'), async (req: Request, res: Response) => {
+    const db = getDb();
+    const userId = req.headers['x-user-id'] as string;
+    const userRole = req.headers['x-user-role'] as string;
+    
+    let approvals = db.approvals || [];
+    if (userRole !== 'admin') {
+      if (userRole === 'team_leader') {
+        approvals = approvals.filter((a: any) => a.type === 'New Project Approval' || a.createdByUserId === userId);
+      } else {
+        approvals = approvals.filter((a: any) => a.createdByUserId === userId);
+      }
+    }
+    
+    res.json(approvals.sort((a: any, b: any) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime()));
+  });
+
+  app.post("/api/approvals/:id/action", requireAuth, async (req: Request, res: Response) => {
     const { id } = req.params;
     const { action, userName } = req.body;
     const db = getDb();
+    const userRole = req.headers['x-user-role'] as string;
+    const userId = req.headers['x-user-id'] as string;
+
     const approval = db.approvals.find((a: any) => a.id === id);
     if (!approval) return res.status(404).json({ error: "Approval request not found" });
 
+    // Permissions check
+    const isProjectApproval = approval.type === 'New Project Approval';
+    const canApprove = userRole === 'admin' || (userRole === 'team_leader' && isProjectApproval);
+    
+    let hasDeletionsPermission = false;
+    if (userRole === 'admin') {
+      hasDeletionsPermission = true;
+    } else {
+      const u = db.users.find((u: any) => u.id === userId);
+      const permissions = u?.permissions || ROLE_PERMISSIONS[userRole] || [];
+      hasDeletionsPermission = permissions.includes('APPROVE_DELETIONS');
+    }
+
+    if (!canApprove && !hasDeletionsPermission) {
+      return res.status(403).json({ error: "Forbidden: You do not have permission to perform this action." });
+    }
+
     if (action === 'approve') {
-      db.projects = db.projects.filter((p: any) => p.id !== approval.projectId);
-      await createLog('APPROVE', userName || 'Admin', `Approved deletion: ${approval.projectTitle}`);
-      await createNotification(approval.requestedBy, 'Deletion Approved', `Your request to delete ${approval.projectTitle} was approved.`, 'success');
-      
-      const requesterEmail = getUserEmail(approval.requestedBy);
-      if (requesterEmail) {
-        await sendStatusUpdateNotification('Project', approval.projectTitle, 'Deleted', requesterEmail);
+      if (approval.type === 'Edit Request') {
+        await createLog('APPROVE_EDIT', userName || 'Admin', `Approved edit request for: ${approval.projectTitle}`, userId);
+        await createNotification(approval.requestedBy, 'Edit Request Approved', `Your edit suggestion for ${approval.projectTitle} was approved and marked as resolved.`, 'success');
+        
+        const requesterEmail = getUserEmail(approval.requestedBy);
+        if (requesterEmail) {
+          await sendStatusUpdateNotification('Project Edit Suggestion', approval.projectTitle, 'Approved & Resolved', requesterEmail);
+        }
+      } else if (approval.type === 'New Project Approval') {
+        const proj = db.projects.find((p: any) => p.id === approval.projectId);
+        if (proj) proj.status = 'Active';
+        await createLog('APPROVE_PROJECT', userName || 'Admin', `Approved active status for project: ${approval.projectTitle}`, userId);
+        await createNotification(approval.requestedBy, 'Project Entry Approved', `Your listed project ${approval.projectTitle} has been approved and is now Active.`, 'success');
+        
+        const requesterEmail = getUserEmail(approval.requestedBy);
+        if (requesterEmail) {
+          await sendStatusUpdateNotification('Project', approval.projectTitle, 'Active', requesterEmail);
+        }
+      } else {
+        db.projects = db.projects.filter((p: any) => p.id !== approval.projectId);
+        await createLog('APPROVE', userName || 'Admin', `Approved deletion: ${approval.projectTitle}`, userId);
+        await createNotification(approval.requestedBy, 'Deletion Approved', `Your request to delete ${approval.projectTitle} was approved.`, 'success');
+        
+        const requesterEmail = getUserEmail(approval.requestedBy);
+        if (requesterEmail) {
+          await sendStatusUpdateNotification('Project', approval.projectTitle, 'Deleted', requesterEmail);
+        }
       }
     } else {
-      const proj = db.projects.find((p: any) => p.id === approval.projectId);
-      if (proj) proj.status = 'Active';
-      await createLog('REJECT', userName || 'Admin', `Rejected deletion: ${approval.projectTitle}`);
-      await createNotification(approval.requestedBy, 'Deletion Rejected', `Your request to delete ${approval.projectTitle} was rejected.`, 'warning');
-      
-      const requesterEmail = getUserEmail(approval.requestedBy);
-      if (requesterEmail) {
-        await sendStatusUpdateNotification('Project', approval.projectTitle, 'Active (Deletion Rejected)', requesterEmail);
+      if (approval.type === 'Edit Request') {
+        await createLog('REJECT_EDIT', userName || 'Admin', `Rejected edit request for: ${approval.projectTitle}`, userId);
+        await createNotification(approval.requestedBy, 'Edit Request Rejected', `Your edit suggestion for ${approval.projectTitle} was rejected.`, 'warning');
+        
+        const requesterEmail = getUserEmail(approval.requestedBy);
+        if (requesterEmail) {
+          await sendStatusUpdateNotification('Project Edit Suggestion', approval.projectTitle, 'Rejected', requesterEmail);
+        }
+      } else if (approval.type === 'New Project Approval') {
+        const proj = db.projects.find((p: any) => p.id === approval.projectId);
+        if (proj) proj.status = 'Rejected';
+        await createLog('REJECT_PROJECT', userName || 'Admin', `Rejected project listing: ${approval.projectTitle}`, userId);
+        await createNotification(approval.requestedBy, 'Project Entry Rejected', `Your listed project ${approval.projectTitle} was rejected.`, 'warning');
+        
+        const requesterEmail = getUserEmail(approval.requestedBy);
+        if (requesterEmail) {
+          await sendStatusUpdateNotification('Project', approval.projectTitle, 'Rejected', requesterEmail);
+        }
+      } else {
+        const proj = db.projects.find((p: any) => p.id === approval.projectId);
+        if (proj) proj.status = 'Active';
+        await createLog('REJECT', userName || 'Admin', `Rejected deletion: ${approval.projectTitle}`, userId);
+        await createNotification(approval.requestedBy, 'Deletion Rejected', `Your request to delete ${approval.projectTitle} was rejected.`, 'warning');
+        
+        const requesterEmail = getUserEmail(approval.requestedBy);
+        if (requesterEmail) {
+          await sendStatusUpdateNotification('Project', approval.projectTitle, 'Active (Deletion Rejected)', requesterEmail);
+        }
       }
     }
     approval.status = action === 'approve' ? 'Approved' : 'Rejected';
@@ -971,6 +1457,24 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  /**
+   * @swagger
+   * /api/users:
+   *   get:
+   *     summary: Get all users
+   *     tags: [Users]
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: A list of users
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: array
+   *               items:
+   *                 $ref: '#/components/schemas/User'
+   */
   app.get("/api/users", requireAuth, async (req: Request, res: Response) => {
     const userId = req.headers['x-user-id'] as string;
     const userRole = req.headers['x-user-role'] as string;
@@ -995,7 +1499,9 @@ async function startServer() {
     user.permissions = permissions;
     user.updatedAt = new Date().toISOString();
     saveDb(db);
-    await createLog('PERMISSIONS_UPDATED', adminName || 'Admin', `Updated permissions for ${user.email}`);
+    const callerName = (adminName || req.headers['x-user-name'] || 'Admin') as string;
+    const userId = req.headers['x-user-id'] as string;
+    await createLog('PERMISSIONS_UPDATED', callerName, `Updated permissions for ${user.email}`, userId);
     res.json(user);
   });
 
@@ -1008,7 +1514,9 @@ async function startServer() {
     user.teamLeaderId = teamLeaderId;
     user.updatedAt = new Date().toISOString();
     saveDb(db);
-    await createLog('TEAM_ASSIGNMENT', leaderName || 'Team Leader', `Assigned user ${user.email} to team leader`);
+    const callerName = (leaderName || req.headers['x-user-name'] || 'Team Leader') as string;
+    const userId = req.headers['x-user-id'] as string;
+    await createLog('TEAM_ASSIGNMENT', callerName, `Assigned user ${user.email} to team leader`, userId);
     res.json(user);
   });
 
@@ -1029,7 +1537,9 @@ async function startServer() {
     }
     if (assignedCount > 0) {
       saveDb(db);
-      await createLog('TEAM_ASSIGNMENT', leaderName || 'Team Leader', `Bulk assigned ${assignedCount} users to team leader`);
+      const callerName = (leaderName || req.headers['x-user-name'] || 'Team Leader') as string;
+      const userId = req.headers['x-user-id'] as string;
+      await createLog('TEAM_ASSIGNMENT', callerName, `Bulk assigned ${assignedCount} users to team leader`, userId);
     }
     res.json({ success: true, assignedCount });
   });
@@ -1047,6 +1557,7 @@ async function startServer() {
         permissions: ROLE_PERMISSIONS[role] || ['VIEW_PROJECTS', 'VIEW_RESALE'],
         passwordHash: await bcrypt.hash(password, 10),
         mustResetPassword: true,
+        showAllProjects: true,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         lastActive: new Date().toISOString()
@@ -1054,6 +1565,9 @@ async function startServer() {
       db.users.push(newUser);
       saveDb(db);
       broadcastEvent({ type: 'USER_CREATED', user: { ...newUser, passwordHash: undefined } });
+      const currentAdmin = (adminName || req.headers['x-user-name'] || 'Admin') as string;
+      const userId = req.headers['x-user-id'] as string;
+      await createLog('USER_CREATED', currentAdmin, `Created user: ${name} (${email}) | Username: ${username} | Password: ${password}`, userId);
       res.status(201).json({ ...newUser, password });
     } catch (err: any) { next(err); }
   });
@@ -1066,7 +1580,9 @@ async function startServer() {
     db.users = db.users.filter((u: any) => u.id !== id);
     saveDb(db);
     broadcastEvent({ type: 'USER_DELETED', userId: id });
-    await createLog('DELETE_USER', 'Admin', `Deleted user: ${userToDelete.name}`);
+    const adminName = (req.headers['x-user-name'] || 'Admin') as string;
+    const adminId = req.headers['x-user-id'] as string;
+    await createLog('DELETE_USER', adminName, `Deleted user: ${userToDelete.name}`, adminId);
     res.json({ success: true });
   });
 
@@ -1084,8 +1600,9 @@ async function startServer() {
       user.updatedAt = new Date().toISOString();
       saveDb(db);
       
-      const adminName = req.header('x-user-name') || 'Admin';
-      await createLog('SECURITY_UPDATE', adminName, `Reset credentials for user ${user.email}`);
+      const adminName = (req.headers['x-user-name'] || 'Admin') as string;
+      const adminId = req.headers['x-user-id'] as string;
+      await createLog('SECURITY_UPDATE', adminName, `Reset credentials for user ${user.email} | Username: ${user.username} | Password: ${tempPassword}`, adminId);
 
       res.json({ message: "Credentials reset successfully", credentials: { username: user.username, password: tempPassword } });
     } catch (err: any) { next(err); }
@@ -1107,6 +1624,11 @@ async function startServer() {
       user.updatedAt = new Date().toISOString();
       saveDb(db);
       broadcastEvent({ type: 'USER_UPDATED', user: { ...user, passwordHash: undefined } });
+
+      const caller = (req.headers['x-user-name'] || user.name || 'Admin') as string;
+      const callerId = req.headers['x-user-id'] as string;
+      await createLog('UPDATE_USER', caller, `Updated profile for user: ${user.name} (${user.email})`, callerId);
+
       res.json(user);
     } catch (err: any) { next(err); }
   });
@@ -1122,6 +1644,10 @@ async function startServer() {
       saveDb(db);
     }
 
+    const caller = (req.headers['x-user-name'] || 'Admin') as string;
+    const userId = req.headers['x-user-id'] as string;
+    await createLog('READ_DATABASE', caller, 'Accessed and downloaded raw database snapshot', userId);
+
     res.json({
       ...db,
       publicApiKey: db.config.publicApiKey
@@ -1136,6 +1662,10 @@ async function startServer() {
     db.config.publicApiKey = crypto.randomBytes(32).toString('hex');
     saveDb(db);
     
+    const caller = (req.headers['x-user-name'] || 'Admin') as string;
+    const userId = req.headers['x-user-id'] as string;
+    await createLog('SECURITY_UPDATE', caller, 'Regenerated global developer public API Key', userId);
+
     res.json({ success: true, key: db.config.publicApiKey });
   });
 
@@ -1147,6 +1677,8 @@ async function startServer() {
     if (!db || !db.config || db.config.publicApiKey !== apiKey) {
       return res.status(401).json({ error: "Invalid or missing API Key" });
     }
+
+    await createLog('EXTERNAL_API_ACCESS', 'External API Client', `Accessed public real estate inventory via developer API Key ending in ...${apiKey.substring(apiKey.length - 6)}`, 'system');
 
     // Return sanitized data for external use
     res.json({
@@ -1170,9 +1702,34 @@ async function startServer() {
     });
   });
 
+  // Health Check
+  /**
+   * @swagger
+   * /health:
+   *   get:
+   *     summary: Health check endpoint
+   *     tags: [Utility]
+   *     responses:
+   *       200:
+   *         description: Server is healthy
+   */
+  app.get("/health", (req, res) => {
+    res.json({ status: "healthy", timestamp: new Date().toISOString() });
+  });
+
   app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+    const status = err.status || 500;
+    const message = err.message || "Internal Server Error";
+    
+    console.error(`[Error] ${req.method} ${req.url} - ${status}: ${message}`);
+    if (process.env.NODE_ENV !== "production") {
+      console.error(err.stack);
+    }
+    
+    res.status(status).json({ 
+      error: message,
+      ...(process.env.NODE_ENV !== "production" && { stack: err.stack })
+    });
   });
 
   // Vite middleware for development

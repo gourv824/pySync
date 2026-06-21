@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { User, Mail, Shield, UserPlus, Eye, EyeOff, Key } from 'lucide-react';
+import { User, Mail, Shield, UserPlus, Eye, EyeOff, Key, ChevronDown } from 'lucide-react';
 import { PasswordStrengthMeter } from './PasswordStrengthMeter';
+import { CustomSelect } from '../CustomSelect';
 
 interface CredentialFormProps {
   onSubmit: (formData: any) => Promise<void>;
@@ -64,18 +65,21 @@ export const CredentialForm: React.FC<CredentialFormProps> = ({ onSubmit, isLoad
           </div>
           <div className="space-y-1.5">
             <label className="text-[10px] text-text-dim uppercase tracking-widest font-bold ml-1">Role</label>
-            <div className="relative">
-              <Shield size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim" />
-              <select 
-                name="role"
+            <div className="relative group">
+              <Shield size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim group-hover:text-amber-primary transition-colors z-10" />
+              <CustomSelect
+                id="role"
                 value={formData.role}
-                onChange={handleChange}
-                className="w-full bg-surface-2 border border-border-bright p-3 pl-10 rounded-xl text-xs text-text-primary focus:border-amber-primary outline-none transition-all appearance-none"
-              >
-                <option value="employee">Employee</option>
-                <option value="team_leader">Team Leader</option>
-                <option value="admin">System Admin</option>
-              </select>
+                onChange={(val) => {
+                  setFormData(prev => ({ ...prev, role: val as any }));
+                }}
+                buttonClassName="pl-10 h-[42px] text-xs"
+                options={[
+                  { value: 'employee', label: 'Employee', desc: 'Standard staff view and data capture' },
+                  { value: 'team_leader', label: 'Team Leader', desc: 'Supervise pipelines and verify submissions' },
+                  { value: 'admin', label: 'System Admin', desc: 'Full administration and database configuration access' }
+                ]}
+              />
             </div>
           </div>
         </div>

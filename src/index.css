@@ -50,11 +50,18 @@
     width: 100%;
     margin: 0;
     padding: 0;
+    overscroll-behavior-y: contain;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button, a, select, input {
+    touch-action: manipulation;
   }
 
   body {
     @apply bg-bg text-text-primary font-mono antialiased;
     transition: background-color var(--motion-duration, 0.2s), color var(--motion-duration, 0.2s);
+    -webkit-overflow-scrolling: touch;
   }
 
   #root {
