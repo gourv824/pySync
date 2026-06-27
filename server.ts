@@ -1001,6 +1001,7 @@ async function startServer() {
 
         const filterByUser = (items: any[], type?: string) => {
           if (userRole === 'admin') return items;
+          if (type === 'projects' || type === 'resale') return items;
           if (currentUserObj?.showAllProjects && type === 'projects') return items;
           return items.filter((item: any) => item.createdByUserId === userId);
         };
@@ -1028,8 +1029,7 @@ async function startServer() {
       if (permissions.includes('VIEW_PROJECTS')) {
         const allProjects = db.projects || [];
         const sortedProjects = [...allProjects].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        const currentUserObj = db.users?.find((u: any) => u.id === userId);
-        result.projects = (userRole === 'admin' || currentUserObj?.showAllProjects) ? sortedProjects : sortedProjects.filter((p: any) => p.createdByUserId === userId);
+        result.projects = sortedProjects;
       } else {
         result.projects = [];
       }
@@ -1038,7 +1038,7 @@ async function startServer() {
       if (permissions.includes('VIEW_RESALE')) {
         const allResales = db.resaleProperties || [];
         const sortedResales = [...allResales].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        result.resaleProperties = userRole === 'admin' ? sortedResales : sortedResales.filter((p: any) => p.createdByUserId === userId);
+        result.resaleProperties = sortedResales;
       } else {
         result.resaleProperties = [];
       }
@@ -1124,6 +1124,7 @@ async function startServer() {
 
     const filterByUser = (items: any[], type?: string) => {
       if (userRole === 'admin') return items;
+      if (type === 'projects' || type === 'resale') return items;
       if (currentUserObj?.showAllProjects && type === 'projects') return items;
       return items.filter((item: any) => item.createdByUserId === userId);
     };

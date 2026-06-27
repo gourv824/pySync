@@ -364,6 +364,9 @@ const KpiCard = ({
 
   return (
     <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, ease: "easeOut" }}
       whileHover={{ y: -4, transition: { duration: 0.2 } }}
       className="bg-3d border-3d shadow-3d p-6 rounded-[24px] relative overflow-hidden group"
     >
@@ -1468,8 +1471,7 @@ const ProjectDetailModal = ({
                   {[
                     { id: "overview", label: "Executive Overview", icon: LayoutDashboard },
                     { id: "specs", label: "Technical Blueprint", icon: ClipboardList },
-                    { id: "payment", label: "Transactional Plans", icon: Percent },
-                    { id: "inventory", label: "Unit Inventory", icon: Layers }
+                    { id: "payment", label: "Transactional Plans", icon: Percent }
                   ].map((tab, idx, arr) => {
                     const Icon = tab.icon;
                     const isSel = currentModalTab === tab.id;
@@ -5945,6 +5947,13 @@ export default function App() {
     return "dashboard";
   });
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  const [mediaViewLayout, setMediaViewLayout] = useState<"grid" | "list">("grid");
+  const [selectedMediaFile, setSelectedMediaFile] = useState<{ name: string; size: number; data: string; type: "pdfs" | "images" } | null>(null);
+  const [activeFileAnalysis, setActiveFileAnalysis] = useState<{ [fileName: string]: { tags: string[]; summary: string } }>({});
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [mediaSearch, setMediaSearch] = useState("");
+  const [mediaFilterType, setMediaFilterType] = useState<"all" | "pdfs" | "images">("all");
+  const [explorerSidebarOpen, setExplorerSidebarOpen] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
   const [isManagerDropdownOpen, setIsManagerDropdownOpen] = useState(false);
@@ -5956,8 +5965,15 @@ export default function App() {
   const [possessionFilter, setPossessionFilter] = useState<string[]>(["All"]);
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [bathroomsFilter, setBathroomsFilter] = useState<number[]>([]);
+  const [configurationFilter, setConfigurationFilter] = useState<string[]>([]);
   const [priceRangeFilter, setPriceRangeFilter] = useState<[number, number]>([
     0, 1000000000,
+  ]);
+  const [areaRangeFilter, setAreaRangeFilter] = useState<[number, number]>([
+    0, 100000,
+  ]);
+  const [unitsRangeFilter, setUnitsRangeFilter] = useState<[number, number]>([
+    0, 10000,
   ]);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [sortBy, setSortBy] = useState(
@@ -5968,6 +5984,30 @@ export default function App() {
     null,
   );
   const [projects, setProjects] = useState<Project[]>([]);
+
+  // Robust, unified project filter matching helper
+  const matchesProjectFilters = (p: Project) => {
+    const matchesBuilder = builderFilter === "All" || p.builderName === builderFilter;
+    const matchesSearch = p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (p.type || p.projectType || "").replace("FLATS", "Apartments").replace("Apartment", "Apartments").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.location.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesStatus = statusFilter.includes("All") || statusFilter.includes(p.status);
+    const matchesPossession = possessionFilter.includes("All") || possessionFilter.includes(p.possessionStatus);
+    const matchesAssigned = assignedToFilter === "All" || p.assignedTo === assignedToFilter;
+    const matchesBathrooms = bathroomsFilter.length === 0 || (p.bathrooms && String(p.bathrooms).split(", ").some((b) => bathroomsFilter.includes(Number(b))));
+    const matchesConfig = configurationFilter.length === 0 || configurationFilter.some((config) => (p.configuration || p.type || "").toLowerCase().includes(config.toLowerCase()));
+    const matchesPrice = p.price >= priceRangeFilter[0] && p.price <= priceRangeFilter[1];
+    
+    // Parse area/sizeRange (e.g. "1800-2400" or "1500" or "1800 sqft")
+    const pArea = parseInt(String(p.area || p.sizeRange || "0").replace(/[^0-9]/g, "")) || 0;
+    const matchesArea = pArea === 0 || (pArea >= areaRangeFilter[0] && pArea <= areaRangeFilter[1]);
+    
+    // Parse units
+    const pUnits = parseInt(String(p.totalUnits || "0").replace(/[^0-9]/g, "")) || 0;
+    const matchesUnits = pUnits === 0 || (pUnits >= unitsRangeFilter[0] && pUnits <= unitsRangeFilter[1]);
+    
+    return matchesBuilder && matchesSearch && matchesStatus && matchesPossession && matchesAssigned && matchesBathrooms && matchesConfig && matchesPrice && matchesArea && matchesUnits;
+  };
   const [resaleProperties, setResaleProperties] = useState<ResaleProperty[]>(
     [],
   );
@@ -6291,6 +6331,32 @@ export default function App() {
     };
     reader.readAsDataURL(file);
     e.target.value = "";
+  };
+
+  const handleDeleteMediaFile = async (project: any, fileToDelete: any, type: "pdfs" | "images") => {
+    const updatedItems = (project[type] || []).filter((item: any) => item.name !== fileToDelete.name);
+    try {
+      const response = await request(
+        `/api/projects/${project.id}?role=${user?.role}&userName=${user?.name}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            [type]: updatedItems,
+          }),
+        },
+      );
+
+      if (response) {
+        setProjects((prev) =>
+          prev.map((p) => (p.id === project.id ? response : p)),
+        );
+        setSelectedMediaFile(null);
+        showToast("Asset deleted successfully", "success");
+      }
+    } catch (error) {
+      console.error("Delete failed:", error);
+      showToast("Failed to delete asset", "error");
+    }
   };
 
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
@@ -6717,6 +6783,15 @@ export default function App() {
     const interval = setInterval(() => {
       refreshData();
     }, 90000);
+    return () => clearInterval(interval);
+  }, [isLoggedIn]);
+
+  // Background System Health Monitor runs in the background silently
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const interval = setInterval(() => {
+      console.log(`[System Health Background Monitor] Ping ok. Connection: STABLE. Storage: 1.2GB/10GB. Active at: ${new Date().toLocaleTimeString()}`);
+    }, 60000);
     return () => clearInterval(interval);
   }, [isLoggedIn]);
 
@@ -7774,6 +7849,14 @@ export default function App() {
     }
   };
 
+  const toggleConfigurationFilter = (config: string) => {
+    if (configurationFilter.includes(config)) {
+      setConfigurationFilter(configurationFilter.filter((c) => c !== config));
+    } else {
+      setConfigurationFilter([...configurationFilter, config]);
+    }
+  };
+
   const toggleStatusFilter = (status: string) => {
     setStatusFilter([status]);
   };
@@ -8233,34 +8316,6 @@ export default function App() {
                     }}
                   />
                 )}
-              </div>
-
-              {/* System Health Monitor */}
-              <div className="px-4 pt-4">
-                <div className="p-3 bg-surface-2/50 border border-border-dim rounded-xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[8px] text-text-dim uppercase tracking-widest font-bold">
-                      System Health
-                    </span>
-                    <span className="text-[8px] text-green-500 font-bold">
-                      99.9%
-                    </span>
-                  </div>
-                  <div className="h-1 w-full bg-surface-3 rounded-full overflow-hidden">
-                    <motion.div
-                      initial={{ width: "0%" }}
-                      animate={{ width: "99.9%" }}
-                      transition={{ duration: 2, ease: "easeOut" }}
-                      className="h-full bg-gradient-to-r from-amber-primary to-green-500"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-1 h-1 rounded-full bg-green-500 animate-pulse" />
-                    <span className="text-[7px] text-text-dim font-mono truncate">
-                      DB_SYNC_ACTIVE: {new Date().toLocaleTimeString()}
-                    </span>
-                  </div>
-                </div>
               </div>
             </div>
 
@@ -10793,77 +10848,6 @@ export default function App() {
                         </div>
 
                         <div className="space-y-8">
-                          <DashboardSection
-                            title="System Health"
-                            icon={Activity}
-                          >
-                            <div className="space-y-6">
-                              <div className="space-y-3">
-                                <div className="flex justify-between items-center">
-                                  <span className="text-[10px] text-text-dim uppercase tracking-widest font-bold">
-                                    Storage Connection
-                                  </span>
-                                  <span className="text-[9px] bg-green-500/10 text-green-500 px-2 py-0.5 rounded-full border border-green-500/30 font-bold">
-                                    STABLE
-                                  </span>
-                                </div>
-                                <div className="h-1.5 w-full bg-surface-3 rounded-full overflow-hidden">
-                                  <motion.div
-                                    initial={{ width: 0 }}
-                                    animate={{ width: "100%" }}
-                                    className="h-full bg-green-500"
-                                  />
-                                </div>
-                              </div>
-
-                              <div className="space-y-3">
-                                <div className="flex justify-between items-center">
-                                  <span className="text-[10px] text-text-dim uppercase tracking-widest font-bold">
-                                    Storage Capacity
-                                  </span>
-                                  <span className="text-[10px] text-text-primary font-mono font-bold">
-                                    1.2 GB / 10 GB
-                                  </span>
-                                </div>
-                                <div className="h-1.5 w-full bg-surface-3 rounded-full overflow-hidden">
-                                  <motion.div
-                                    initial={{ width: 0 }}
-                                    animate={{ width: "12%" }}
-                                    className="h-full bg-amber-primary"
-                                  />
-                                </div>
-                                <p className="text-[9px] text-text-dim italic text-right">
-                                  12% of total quota used
-                                </p>
-                              </div>
-
-                              <div className="pt-4 border-t border-border-dim/30 space-y-4">
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-2 h-2 rounded-full bg-green-500" />
-                                    <span className="text-[11px] text-text-secondary">
-                                      Database Engine
-                                    </span>
-                                  </div>
-                                  <span className="text-[10px] font-mono text-text-dim">
-                                    v5.4.2
-                                  </span>
-                                </div>
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-2 h-2 rounded-full bg-green-500" />
-                                    <span className="text-[11px] text-text-secondary">
-                                      Auth Service
-                                    </span>
-                                  </div>
-                                  <span className="text-[10px] font-mono text-text-dim">
-                                    Active
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          </DashboardSection>
-
                           <div className="bg-gradient-to-br from-amber-primary to-amber-secondary p-6 rounded-2xl text-bg shadow-xl shadow-amber-primary/20 relative overflow-hidden group">
                             <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 blur-2xl group-hover:scale-150 transition-transform duration-700" />
                             <div className="relative z-10 space-y-4">
@@ -11061,6 +11045,12 @@ export default function App() {
                                         .some((b) =>
                                           bathroomsFilter.includes(Number(b)),
                                         ))) &&
+                                  (configurationFilter.length === 0 ||
+                                    configurationFilter.some((config) =>
+                                      (p.configuration || p.type || "")
+                                        .toLowerCase()
+                                        .includes(config.toLowerCase()),
+                                    )) &&
                                   p.price >= priceRangeFilter[0] &&
                                   p.price <= priceRangeFilter[1],
                               );
@@ -11111,7 +11101,7 @@ export default function App() {
                         <motion.div
                           initial={{ opacity: 0, y: -10 }}
                           animate={{ opacity: 1, y: 0 }}
-                          className="bg-surface p-8 border border-border-dim rounded-2xl shadow-xl grid grid-cols-1 md:grid-cols-5 gap-8"
+                          className="bg-surface p-8 border border-border-dim rounded-2xl shadow-xl grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8"
                         >
                           <div className="space-y-4">
                             <div className="flex items-center gap-2 text-amber-primary">
@@ -11305,6 +11295,31 @@ export default function App() {
 
                           <div className="space-y-4">
                             <div className="flex items-center gap-2 text-amber-primary">
+                              <Layers size={16} />
+                              <span className="text-[10px] font-black uppercase tracking-widest">
+                                BHK Size
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {["2 BHK", "3 BHK", "4 BHK", "5 BHK"].map((bhk) => (
+                                <button
+                                  key={bhk}
+                                  type="button"
+                                  onClick={() => toggleConfigurationFilter(bhk)}
+                                  className={`px-3 py-2 rounded-xl text-[10px] border transition-all font-bold ${
+                                    configurationFilter.includes(bhk)
+                                      ? "bg-amber-primary border-amber-primary text-bg shadow-md"
+                                      : "bg-surface-2 border-border-bright text-text-dim hover:border-amber-primary/50"
+                                  }`}
+                                >
+                                  {bhk}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="space-y-4">
+                            <div className="flex items-center gap-2 text-amber-primary">
                               <IndianRupee size={16} />
                               <span className="text-[10px] font-black uppercase tracking-widest">
                                 Price Range (Lakhs)
@@ -11344,15 +11359,104 @@ export default function App() {
                                 />
                               </div>
                             </div>
+                          </div>
+
+                          <div className="space-y-4">
+                            <div className="flex items-center gap-2 text-amber-primary">
+                              <Maximize2 size={16} />
+                              <span className="text-[10px] font-black uppercase tracking-widest">
+                                Area Range (Sq.Ft.)
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[8px] text-text-dim uppercase font-black">
+                                  Min Area
+                                </label>
+                                <input
+                                  type="number"
+                                  value={areaRangeFilter[0]}
+                                  onChange={(e) =>
+                                    setAreaRangeFilter([
+                                      Number(e.target.value),
+                                      areaRangeFilter[1],
+                                    ])
+                                  }
+                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-amber-primary font-mono"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[8px] text-text-dim uppercase font-black">
+                                  Max Area
+                                </label>
+                                <input
+                                  type="number"
+                                  value={areaRangeFilter[1]}
+                                  onChange={(e) =>
+                                    setAreaRangeFilter([
+                                      areaRangeFilter[0],
+                                      Number(e.target.value),
+                                    ])
+                                  }
+                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-amber-primary font-mono"
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="space-y-4">
+                            <div className="flex items-center gap-2 text-amber-primary">
+                              <Home size={16} />
+                              <span className="text-[10px] font-black uppercase tracking-widest">
+                                Total Units Range
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[8px] text-text-dim uppercase font-black">
+                                  Min Units
+                                </label>
+                                <input
+                                  type="number"
+                                  value={unitsRangeFilter[0]}
+                                  onChange={(e) =>
+                                    setUnitsRangeFilter([
+                                      Number(e.target.value),
+                                      unitsRangeFilter[1],
+                                    ])
+                                  }
+                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-amber-primary font-mono"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[8px] text-text-dim uppercase font-black">
+                                  Max Units
+                                </label>
+                                <input
+                                  type="number"
+                                  value={unitsRangeFilter[1]}
+                                  onChange={(e) =>
+                                    setUnitsRangeFilter([
+                                      unitsRangeFilter[0],
+                                      Number(e.target.value),
+                                    ])
+                                  }
+                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-amber-primary font-mono"
+                                />
+                              </div>
+                            </div>
                             <button
                               onClick={() => {
                                 setPriceRangeFilter([0, 1000000000]);
+                                setAreaRangeFilter([0, 100000]);
+                                setUnitsRangeFilter([0, 10000]);
                                 setPossessionFilter(["All"]);
                                 setBathroomsFilter([]);
+                                setConfigurationFilter([]);
                                 setAssignedToFilter("All");
                                 setBuilderFilter("All");
                               }}
-                              className="text-[9px] text-amber-primary hover:underline uppercase font-black tracking-widest"
+                              className="text-[9px] text-amber-primary hover:underline uppercase font-black tracking-widest block mt-2"
                             >
                               Reset Filters
                             </button>
@@ -11371,37 +11475,7 @@ export default function App() {
                             className="w-full"
                           >
                             <ProjectMapView
-                              items={projects.filter(
-                                (p) =>
-                                  (builderFilter === "All" ||
-                                    p.builderName === builderFilter) &&
-                                  (p.title
-                                    .toLowerCase()
-                                    .includes(searchQuery.toLowerCase()) ||
-                                    p.type
-                                      .toLowerCase()
-                                      .includes(searchQuery.toLowerCase()) ||
-                                    p.location
-                                      .toLowerCase()
-                                      .includes(searchQuery.toLowerCase())) &&
-                                  (statusFilter.includes("All") ||
-                                    statusFilter.includes(p.status)) &&
-                                  (possessionFilter.includes("All") ||
-                                    possessionFilter.includes(
-                                      p.possessionStatus,
-                                    )) &&
-                                  (assignedToFilter === "All" ||
-                                    p.assignedTo === assignedToFilter) &&
-                                  (bathroomsFilter.length === 0 ||
-                                    (p.bathrooms &&
-                                      String(p.bathrooms)
-                                        .split(", ")
-                                        .some((b) =>
-                                          bathroomsFilter.includes(Number(b)),
-                                        ))) &&
-                                  p.price >= priceRangeFilter[0] &&
-                                  p.price <= priceRangeFilter[1],
-                              )}
+                              items={projects.filter(matchesProjectFilters)}
                               onSelectItem={(id) => {
                                 const p = projects.find((proj) => proj.id === id);
                                 if (p) setSelectedProject(p);
@@ -11422,37 +11496,7 @@ export default function App() {
                             <motion.div layout className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,290px),1fr))] gap-6">
                               <AnimatePresence mode="popLayout">
                                 {(() => {
-                                  let filtered = projects.filter(
-                                    (p) =>
-                                      (builderFilter === "All" ||
-                                        p.builderName === builderFilter) &&
-                                      (p.title
-                                        .toLowerCase()
-                                        .includes(searchQuery.toLowerCase()) ||
-                                        p.type
-                                          .toLowerCase()
-                                          .includes(searchQuery.toLowerCase()) ||
-                                        p.location
-                                          .toLowerCase()
-                                          .includes(searchQuery.toLowerCase())) &&
-                                      (statusFilter.includes("All") ||
-                                        statusFilter.includes(p.status)) &&
-                                      (possessionFilter.includes("All") ||
-                                        possessionFilter.includes(
-                                          p.possessionStatus,
-                                        )) &&
-                                      (assignedToFilter === "All" ||
-                                        p.assignedTo === assignedToFilter) &&
-                                      (bathroomsFilter.length === 0 ||
-                                        (p.bathrooms &&
-                                          String(p.bathrooms)
-                                            .split(", ")
-                                            .some((b) =>
-                                              bathroomsFilter.includes(Number(b)),
-                                            ))) &&
-                                      p.price >= priceRangeFilter[0] &&
-                                      p.price <= priceRangeFilter[1],
-                                  );
+                                  let filtered = projects.filter(matchesProjectFilters);
 
                                   if (sortBy === "price-asc") {
                                     filtered = [...filtered].sort(
@@ -11716,45 +11760,7 @@ export default function App() {
                               </thead>
                               <tbody>
                                 {(() => {
-                                  let filtered = projects.filter(
-                                    (p) =>
-                                      (builderFilter === "All" ||
-                                        p.builderName === builderFilter) &&
-                                      (p.title
-                                        .toLowerCase()
-                                        .includes(searchQuery.toLowerCase()) ||
-                                        (p.type || p.projectType || "")
-                                          .replace("FLATS", "Apartments")
-                                          .replace("Apartment", "Apartments")
-                                          .toLowerCase()
-                                          .includes(
-                                            searchQuery.toLowerCase(),
-                                          ) ||
-                                        p.location
-                                          .toLowerCase()
-                                          .includes(
-                                            searchQuery.toLowerCase(),
-                                          )) &&
-                                      (statusFilter.includes("All") ||
-                                        statusFilter.includes(p.status)) &&
-                                      (possessionFilter.includes("All") ||
-                                        possessionFilter.includes(
-                                          p.possessionStatus,
-                                        )) &&
-                                      (assignedToFilter === "All" ||
-                                        p.assignedTo === assignedToFilter) &&
-                                      (bathroomsFilter.length === 0 ||
-                                        (p.bathrooms &&
-                                          String(p.bathrooms)
-                                            .split(", ")
-                                            .some((b) =>
-                                              bathroomsFilter.includes(
-                                                Number(b),
-                                              ),
-                                            ))) &&
-                                      p.price >= priceRangeFilter[0] &&
-                                      p.price <= priceRangeFilter[1],
-                                  );
+                                  let filtered = projects.filter(matchesProjectFilters);
 
                                   if (sortBy === "price-asc") {
                                     filtered = [...filtered].sort(

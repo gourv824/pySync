@@ -97,9 +97,6 @@ export class ResalePropertyController {
     if (this.createLog) await this.createLog('READ_RESALE', caller, 'Viewed resale properties list', userId);
     
     let properties = await this.resalePropertyRepository.findAll();
-    if (userRole !== 'admin') {
-      properties = properties.filter(p => (p as any).createdByUserId === userId);
-    }
     
     res.json(properties);
   };

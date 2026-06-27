@@ -74,13 +74,6 @@ export class ProjectController {
     if (this.createLog) await this.createLog('READ_PROJECTS', caller, 'Viewed projects list', userId);
     
     let projects = await this.projectRepository.findAll();
-    if (userRole !== 'admin') {
-      const db = getDb();
-      const currentUserObj = db?.users?.find((u: any) => u.id === userId);
-      if (!currentUserObj?.showAllProjects) {
-        projects = projects.filter(p => (p as any).createdByUserId === userId);
-      }
-    }
     
     res.json(projects);
   };

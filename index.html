@@ -1,6 +1,103 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <script>
+      (function() {
+        try {
+          var currentFetch = window.fetch;
+          Object.defineProperty(window, 'fetch', {
+            get: function() {
+              return currentFetch;
+            },
+            set: function(val) {
+              currentFetch = val;
+            },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (e) {
+          // Safely ignore if non-configurable
+        }
+
+        var ignoreErrors = [
+          'could not establish connection',
+          'receiving end does not exist',
+          'allowed',
+          'allow',
+          'only a getter',
+          'cannot set property fetch'
+        ];
+
+        function shouldIgnore(message) {
+          if (!message) return false;
+          var str = String(message).toLowerCase();
+          for (var i = 0; i < ignoreErrors.length; i++) {
+            if (str.indexOf(ignoreErrors[i]) !== -1) {
+              return true;
+            }
+          }
+          return false;
+        }
+
+        // 1. window.onerror
+        var originalOnError = window.onerror;
+        window.onerror = function(message, source, lineno, colno, error) {
+          var errorStr = String(message || '');
+          var errorMsg = (error && error.message) || '';
+          if (shouldIgnore(errorStr) || shouldIgnore(errorMsg)) {
+            return true; // Silence
+          }
+          if (originalOnError) {
+            return originalOnError.apply(this, arguments);
+          }
+          return false;
+        };
+
+        // 2. window.addEventListener('error')
+        window.addEventListener('error', function(event) {
+          var errorMsg = event.message || '';
+          var errorObjMsg = (event.error && event.error.message) || '';
+          if (shouldIgnore(errorMsg) || shouldIgnore(errorObjMsg)) {
+            event.stopImmediatePropagation();
+            event.preventDefault();
+          }
+        }, { capture: true });
+
+        // 3. window.addEventListener('unhandledrejection')
+        window.addEventListener('unhandledrejection', function(event) {
+          var reason = event.reason;
+          var reasonStr = reason ? String(reason.message || reason) : '';
+          if (shouldIgnore(reasonStr)) {
+            event.stopImmediatePropagation();
+            event.preventDefault();
+          }
+        }, { capture: true });
+
+        // 4. Overriding console.error
+        var originalConsoleError = console.error;
+        console.error = function() {
+          var args = Array.prototype.slice.call(arguments);
+          var message = args.map(function(arg) {
+            if (arg instanceof Error) {
+              return arg.message + '\n' + arg.stack;
+            }
+            if (typeof arg === 'object' && arg !== null) {
+              try {
+                return JSON.stringify(arg);
+              } catch (_) {
+                return String(arg);
+              }
+            }
+            return String(arg);
+          }).join(' ');
+
+          if (shouldIgnore(message)) {
+            return;
+          }
+          originalConsoleError.apply(console, arguments);
+        };
+      })();
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="theme-color" content="#f59e0b" />
