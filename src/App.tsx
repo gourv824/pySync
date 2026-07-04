@@ -102,7 +102,6 @@ import {
   RegisterForm,
   ForgotPasswordForm,
 } from "./components/credentials/AuthScreens";
-import { SyncIntegrationView } from "./components/SyncIntegrationView";
 
 // --- Types ---
 const HighlightText = ({
@@ -8304,18 +8303,6 @@ export default function App() {
                     playSound("click");
                   }}
                 />
-                {user?.role === "admin" && (
-                  <SidebarItem
-                    icon={RefreshCw}
-                    label="Local Website Sync"
-                    active={activeTab === "sync"}
-                    onClick={() => {
-                      setActiveTab("sync");
-                      setIsMobileMenuOpen(false);
-                      playSound("click");
-                    }}
-                  />
-                )}
               </div>
             </div>
 
@@ -13649,17 +13636,6 @@ export default function App() {
                         isEditing={isReportEditing}
                         setIsEditing={setIsReportEditing}
                       />
-                    </motion.div>
-                  )}
-
-                  {activeTab === "sync" && user?.role === "admin" && (
-                    <motion.div
-                      key="sync"
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="h-full"
-                    >
-                      <SyncIntegrationView user={user} playSound={playSound} />
                     </motion.div>
                   )}
 
