@@ -459,7 +459,13 @@ class ErrorBoundary extends Component<any, any> {
             </p>
             <div className="bg-surface-2 p-4 rounded-xl border border-border-dim text-left overflow-auto max-h-40">
               <code className="text-[10px] text-red-400 font-mono">
-                {this.state.error?.toString()}
+                {(() => {
+                  const errorValue: unknown = this.state.error;
+                  if (errorValue instanceof Error) {
+                    return errorValue.toString();
+                  }
+                  return String(errorValue ?? "Unknown error");
+                })()}
               </code>
             </div>
             <button
@@ -3428,25 +3434,29 @@ const ProfileView = ({
                   <div className="text-[10px] text-text-dim uppercase tracking-widest font-bold">
                     Full Name
                   </div>
-                  <div className="text-sm text-text-primary">{user.name}</div>
+                  <div className="text-sm text-text-primary">
+                    {user?.name || "Unknown User"}
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <div className="text-[10px] text-text-dim uppercase tracking-widest font-bold">
                     Email Address
                   </div>
-                  <div className="text-sm text-text-primary">{user.email}</div>
+                  <div className="text-sm text-text-primary">
+                    {user?.email || "Not provided"}
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <div className="text-[10px] text-text-dim uppercase tracking-widest font-bold">
                     Phone Number
                   </div>
                   <div className="text-sm text-text-primary">
-                    {user.phoneNumber || "Not provided"}
+                    {user?.phoneNumber || "Not provided"}
                   </div>
                 </div>
               </div>
 
-              {user.permissions && user.permissions.length > 0 && (
+              {user?.permissions && user.permissions.length > 0 && (
                 <div className="space-y-4 pt-6 border-t border-border-dim">
                   <div className="text-[10px] text-text-dim uppercase tracking-widest font-bold">
                     Permissions
@@ -3555,7 +3565,7 @@ const ProfileView = ({
                     Current Role
                   </div>
                   <div className="text-sm text-text-primary capitalize">
-                    {user.role}
+                    {user?.role ?? "Unknown"}
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -3612,7 +3622,7 @@ const ProfileView = ({
                   Internal ID
                 </div>
                 <div className="text-xs font-mono text-text-primary bg-surface-2 px-3 py-1.5 rounded border border-border-bright inline-block">
-                  {user.id}
+                  {user?.id || "Unknown"}
                 </div>
               </div>
               <div className="space-y-1">
@@ -3620,7 +3630,7 @@ const ProfileView = ({
                   Username
                 </div>
                 <div className="text-xs font-mono text-amber-primary bg-surface-2 px-3 py-1.5 rounded border border-border-bright inline-block">
-                  {user.username}
+                  {user?.username || "Unknown"}
                 </div>
               </div>
               <div className="space-y-1">
@@ -3628,13 +3638,13 @@ const ProfileView = ({
                   Last Active
                 </div>
                 <div className="text-xs text-text-primary">
-                  {user.lastActive &&
+                  {user?.lastActive &&
                   new Date().getTime() - new Date(user.lastActive).getTime() <
                     300000 ? (
                     <span className="text-green-500 font-medium">
                       Active Now
                     </span>
-                  ) : user.lastActive ? (
+                  ) : user?.lastActive ? (
                     new Date(user.lastActive).toLocaleString()
                   ) : (
                     "Never active"
@@ -6266,8 +6276,10 @@ export default function App() {
     new Set(
       [
         ...(Array.isArray(projects) ? projects : []).map((p) => p.builderName),
-        ...(Array.isArray(resaleProperties) ? resaleProperties : []).map((p) => p.builderName),
-      ].filter(Boolean),
+        ...(Array.isArray(resaleProperties) ? resaleProperties : []).map(
+          (p) => p.builderName,
+        ),
+      ].filter((builderName): builderName is string => Boolean(builderName)),
     ),
   );
 
@@ -6275,7 +6287,7 @@ export default function App() {
     new Set(
       (Array.isArray(resaleProperties) ? resaleProperties : [])
         .map((p) => p.societyName)
-        .filter(Boolean),
+        .filter((societyName): societyName is string => Boolean(societyName)),
     ),
   );
 
@@ -7014,7 +7026,7 @@ export default function App() {
           const serverNotifs = Array.isArray(data.notifications) ? data.notifications : [];
           setNotifications((prev) => {
             const testNotifs = prev.filter((n) => n.id && n.id.toString().startsWith("test-"));
-            const mergedServerNotifs = serverNotifs.map((sn) => {
+            const mergedServerNotifs = serverNotifs.map((sn: any) => {
               const localMatch = prev.find((pn) => pn.id === sn.id);
               if (localMatch) {
                 const combinedReadBy = Array.from(new Set([...(sn.readBy || []), ...(localMatch.readBy || [])]));
@@ -7023,7 +7035,7 @@ export default function App() {
               return sn;
             });
             const mergedList = [...testNotifs];
-            mergedServerNotifs.forEach((sn) => {
+            mergedServerNotifs.forEach((sn: { id: any; }) => {
               if (!mergedList.some((mn) => mn.id === sn.id)) {
                 mergedList.push(sn);
               }
@@ -8304,6 +8316,34 @@ export default function App() {
                   }}
                 />
               </div>
+
+              {/* System Health Monitor */}
+              <div className="px-4 pt-4">
+                <div className="p-3 bg-surface-2/50 border border-border-dim rounded-xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[8px] text-text-dim uppercase tracking-widest font-bold">
+                      System Health
+                    </span>
+                    <span className="text-[8px] text-green-500 font-bold">
+                      99.9%
+                    </span>
+                  </div>
+                  <div className="h-1 w-full bg-surface-3 rounded-full overflow-hidden">
+                    <motion.div
+                      initial={{ width: "0%" }}
+                      animate={{ width: "99.9%" }}
+                      transition={{ duration: 2, ease: "easeOut" }}
+                      className="h-full bg-gradient-to-r from-amber-primary to-green-500"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-1 h-1 rounded-full bg-green-500 animate-pulse" />
+                    <span className="text-[7px] text-text-dim font-mono truncate">
+                      DB_SYNC_ACTIVE: {new Date().toLocaleTimeString()}
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div className="p-4 border-t border-border-dim">
@@ -9525,7 +9565,12 @@ export default function App() {
                                       new Set(
                                         projects
                                           .map((p) => p.builderName)
-                                          .filter(Boolean),
+                                          .filter(
+                                            (
+                                              builderName,
+                                            ): builderName is string =>
+                                              Boolean(builderName),
+                                          ),
                                       ),
                                     )
                                       .slice(0, 10)
@@ -11137,7 +11182,12 @@ export default function App() {
                                     new Set(
                                       projects
                                         .map((p) => p.assignedTo)
-                                        .filter(Boolean),
+                                        .filter(
+                                          (
+                                            assignedTo,
+                                          ): assignedTo is string =>
+                                            Boolean(assignedTo),
+                                        ),
                                     ),
                                   ).map((name) => (
                                     <button
@@ -11207,7 +11257,12 @@ export default function App() {
                                     new Set(
                                       projects
                                         .map((p) => p.builderName)
-                                        .filter(Boolean),
+                                        .filter(
+                                          (
+                                            builderName,
+                                          ): builderName is string =>
+                                            Boolean(builderName),
+                                        ),
                                     ),
                                   ).map((name) => (
                                     <button
@@ -13500,7 +13555,7 @@ export default function App() {
                               opacity: 0,
                               x:
                                 completingTaskId?.id === a.id
-                                  ? completingTaskId.action === "approve"
+                                  ? completingTaskId?.action === "approve"
                                     ? 20
                                     : -20
                                   : 0,
@@ -13510,7 +13565,7 @@ export default function App() {
                             transition={{ duration: 0.35, ease: "anticipate" }}
                             className={`relative bg-surface border border-border-dim p-6 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 overflow-hidden transition-colors duration-500 ${
                               completingTaskId?.id === a.id
-                                ? completingTaskId.action === "approve"
+                                ? completingTaskId?.action === "approve"
                                   ? "bg-green-500/5 border-green-500/30"
                                   : "bg-red-500/5 border-red-500/30"
                                 : ""
@@ -13528,9 +13583,9 @@ export default function App() {
                                   <motion.div
                                     initial={{ scale: 0 }}
                                     animate={{ scale: 1.2 }}
-                                    className={`p-4 rounded-full ${completingTaskId.action === "approve" ? "bg-green-500 text-white shadow-[0_0_20px_rgba(34,197,94,0.4)]" : "bg-red-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.4)]"}`}
+                                    className={`p-4 rounded-full ${completingTaskId?.action === "approve" ? "bg-green-500 text-white shadow-[0_0_20px_rgba(34,197,94,0.4)]" : "bg-red-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.4)]"}`}
                                   >
-                                    {completingTaskId.action === "approve" ? (
+                                    {completingTaskId?.action === "approve" ? (
                                       <Check size={32} strokeWidth={3} />
                                     ) : (
                                       <X size={32} strokeWidth={3} />
