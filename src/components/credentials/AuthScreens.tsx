@@ -10,7 +10,9 @@ import {
   AlertCircle,
   Clock,
   User,
-  Smartphone
+  Smartphone,
+  Briefcase,
+  Users
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { PasswordStrengthMeter } from './PasswordStrengthMeter';
@@ -19,14 +21,27 @@ import { PasswordStrengthMeter } from './PasswordStrengthMeter';
 interface LoginFormProps {
   onLogin: (data: any) => Promise<void>;
   onForgotPassword: () => void;
-  onRegister: () => void;
+  onRegister?: () => void;
   isLoading: boolean;
   error?: string | null;
+  initialIdentifier?: string;
 }
 
-export const LoginForm: React.FC<LoginFormProps> = ({ onLogin, onForgotPassword, onRegister, isLoading, error }) => {
-  const [formData, setFormData] = useState({ email: '', password: '' });
+export const LoginForm: React.FC<LoginFormProps> = ({ 
+  onLogin, 
+  onForgotPassword, 
+  isLoading, 
+  error,
+  initialIdentifier = '' 
+}) => {
+  const [formData, setFormData] = useState({ email: initialIdentifier, password: '' });
   const [showPassword, setShowPassword] = useState(false);
+
+  React.useEffect(() => {
+    if (initialIdentifier && !formData.email) {
+      setFormData(prev => ({ ...prev, email: initialIdentifier }));
+    }
+  }, [initialIdentifier]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,16 +52,16 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin, onForgotPassword,
     <form onSubmit={handleSubmit} className="space-y-3">
       <div className="space-y-2">
         <div className="space-y-0.5">
-          <label className="text-[9px] text-text-dim uppercase tracking-widest font-black ml-1">Work Email</label>
+          <label className="text-[9px] text-text-dim uppercase tracking-widest font-black ml-1">Work Email or Username</label>
           <div className="relative group">
             <Mail size={13} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-dim group-focus-within:text-amber-primary transition-colors" />
             <input 
               required
-              type="email"
+              type="text"
               value={formData.email}
               onChange={e => setFormData({ ...formData, email: e.target.value })}
-              className="w-full bg-surface border-3d shadow-3d-inset p-2.5 pl-10 rounded-[14px] text-xs text-text-primary focus:border-amber-primary outline-none transition-all placeholder:text-text-dim/50"
-              placeholder="name@company.com"
+              className="w-full bg-surface border-3d shadow-3d-inset p-2.5 pl-10 rounded-[14px] text-xs text-text-primary focus:border-amber-primary outline-none transition-all placeholder:text-text-dim/50 font-medium"
+              placeholder="Username or name@company.com"
             />
           </div>
         </div>
@@ -82,7 +97,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin, onForgotPassword,
               value={formData.password}
               onChange={e => setFormData({ ...formData, password: e.target.value })}
               className="w-full bg-surface border-3d shadow-3d-inset p-2.5 pl-10 pr-10 rounded-[14px] font-mono text-xs text-text-primary focus:border-amber-primary outline-none transition-all placeholder:text-text-dim/50"
-              placeholder="12+ chars + digit"
+              placeholder="Enter password"
             />
           </div>
         </div>
@@ -114,13 +129,11 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin, onForgotPassword,
           )}
         </button>
 
-        <button 
-          type="button"
-          onClick={onRegister}
-          className="w-full py-0.5 text-[9px] font-bold text-text-dim hover:text-amber-primary transition-colors uppercase tracking-[0.15em]"
-        >
-          First time? <span className="text-amber-primary ml-1">Register Now</span>
-        </button>
+        <div className="pt-1.5 text-center px-2">
+          <p className="text-[9px] text-text-dim/70 leading-tight">
+            Accounts are provisioned by system administrators. Use credentials sent to your email.
+          </p>
+        </div>
       </div>
     </form>
   );
@@ -140,7 +153,8 @@ export const RegisterForm: React.FC<RegisterFormProps> = ({ onRegister, onBack, 
     email: '', 
     phoneNumber: '', 
     password: '',
-    confirmPassword: ''
+    confirmPassword: '',
+    role: 'employee' as 'employee' | 'team_leader'
   });
   const [showPassword, setShowPassword] = useState(false);
 
@@ -203,6 +217,36 @@ export const RegisterForm: React.FC<RegisterFormProps> = ({ onRegister, onBack, 
                 className="w-full bg-surface border-3d shadow-3d-inset p-2 pl-10 rounded-[14px] text-xs text-text-primary focus:border-amber-primary outline-none transition-all"
                 placeholder="+91 98765 43210"
               />
+            </div>
+          </div>
+
+          <div className="space-y-0.5">
+            <label className="text-[9px] text-text-dim uppercase tracking-widest font-black ml-1">Select Role</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, role: 'employee' })}
+                className={`py-2 px-3 rounded-[14px] text-xs font-bold transition-all border-3d flex items-center justify-center gap-2 cursor-pointer ${
+                  formData.role === 'employee'
+                    ? 'bg-amber-primary text-bg font-black border-amber-primary shadow-3d-button'
+                    : 'bg-surface text-text-dim hover:text-text-primary border border-white/[0.04]'
+                }`}
+              >
+                <Briefcase size={13} />
+                <span>Employee</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, role: 'team_leader' })}
+                className={`py-2 px-3 rounded-[14px] text-xs font-bold transition-all border-3d flex items-center justify-center gap-2 cursor-pointer ${
+                  formData.role === 'team_leader'
+                    ? 'bg-amber-primary text-bg font-black border-amber-primary shadow-3d-button'
+                    : 'bg-surface text-text-dim hover:text-text-primary border border-white/[0.04]'
+                }`}
+              >
+                <Users size={13} />
+                <span>Leader</span>
+              </button>
             </div>
           </div>
 
@@ -275,19 +319,26 @@ export const RegisterForm: React.FC<RegisterFormProps> = ({ onRegister, onBack, 
 // --- Forgot Password ---
 interface ForgotPasswordProps {
   onBack: () => void;
-  onSendReset: (email: string) => Promise<void>;
+  onSendReset: (email: string) => Promise<boolean>;
   isLoading: boolean;
   message?: string | null;
   debugResetLink?: string | null;
   isError?: boolean;
 }
 
-export const ForgotPasswordForm: React.FC<ForgotPasswordProps> = ({ onBack, onSendReset, isLoading, message, debugResetLink, isError }) => {
+export const ForgotPasswordForm: React.FC<ForgotPasswordProps> = ({ 
+  onBack, 
+  onSendReset, 
+  isLoading, 
+  message, 
+  debugResetLink, 
+  isError 
+}) => {
   const [email, setEmail] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleRequestSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSendReset(email);
+    await onSendReset(email);
   };
 
   return (
@@ -298,11 +349,11 @@ export const ForgotPasswordForm: React.FC<ForgotPasswordProps> = ({ onBack, onSe
           Recovery Mode
         </h3>
         <p className="text-[11px] text-text-secondary leading-relaxed">
-          Forgot your credentials? Enter your work email below and we'll send you a secure recovery link.
+          Forgot your credentials? Enter your work email below and we'll send you a secure password reset link.
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleRequestSubmit} className="space-y-6">
         <div className="space-y-1.5">
           <label className="text-[10px] text-text-dim uppercase tracking-widest font-black ml-1">Email for Recovery</label>
           <div className="relative">
@@ -336,17 +387,17 @@ export const ForgotPasswordForm: React.FC<ForgotPasswordProps> = ({ onBack, onSe
           <motion.div 
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="p-4 bg-amber-500/10 border border-amber-500/20 text-amber-primary rounded-xl text-xs space-y-2 font-bold"
+            className="p-4 bg-amber-500/10 border border-amber-500/20 text-amber-primary rounded-xl text-xs space-y-2 font-bold animate-pulse"
           >
             <p className="text-text-primary">🔧 Dev/Test Mode Option:</p>
-            <p className="text-[10px] text-text-dim break-all bg-surface border-3d shadow-3d-inset p-3 rounded-xl text-text-primary select-all font-mono">
-              {debugResetLink}
+            <p className="text-[10px] text-text-dim leading-relaxed">
+              No SMTP settings configured or working in test? Use the link below to access the password reset form directly:
             </p>
             <a 
               href={debugResetLink}
-              className="inline-block w-full text-center p-3 bg-3d border-3d shadow-3d-button text-amber-primary uppercase tracking-wider rounded-[20px] font-bold text-[11px] hover:text-white transition-all"
+              className="inline-block w-full text-center p-3 bg-amber-primary text-bg font-bold text-[11px] rounded-[20px] hover:bg-amber-secondary transition-all uppercase tracking-wider shadow-3d-button"
             >
-              Reset Password Now
+              Go to Reset Form
             </a>
           </motion.div>
         )}
@@ -354,9 +405,10 @@ export const ForgotPasswordForm: React.FC<ForgotPasswordProps> = ({ onBack, onSe
         <div className="flex flex-col gap-3">
           <button 
             disabled={isLoading}
+            type="submit"
             className="w-full p-4 bg-3d border-3d shadow-3d-button text-amber-primary rounded-[20px] font-bold text-sm hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed group relative overflow-hidden flex justify-center items-center gap-2"
           >
-            {isLoading ? 'Processing...' : 'Request Recovery Link'}
+            {isLoading ? 'Processing...' : 'Send Reset Link'}
           </button>
           <button 
             type="button"
@@ -370,3 +422,4 @@ export const ForgotPasswordForm: React.FC<ForgotPasswordProps> = ({ onBack, onSe
     </div>
   );
 };
+

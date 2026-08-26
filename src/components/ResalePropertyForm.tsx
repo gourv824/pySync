@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { reverseGeocode } from "../lib/geocoding";
 import { PdfUpload, PdfFile } from "./PdfUpload";
 import { ImageUpload, ImageFile } from "./ImageUpload";
 import {
@@ -25,6 +26,8 @@ import { geminiService } from "../services/geminiService";
 import { CustomSelect } from "./CustomSelect";
 
 export interface ResalePropertyFormData {
+  transactionGuid?: string;
+  transactionDate?: string;
   propertyHolderName: string;
   societyName: string;
   location: string;
@@ -66,6 +69,7 @@ interface ResalePropertyFormProps {
     bhk: string;
     floorNumber: string;
     location: string;
+    propertyHolderName?: string;
   }[];
   existingBuilders?: string[];
   existingSocieties?: string[];
@@ -73,6 +77,7 @@ interface ResalePropertyFormProps {
     message: string,
     type: "success" | "error" | "info" | "warning",
   ) => void;
+  assignedRegion?: string;
 }
 
 const isBhkApplicable = (type: string): boolean => {
@@ -84,6 +89,14 @@ const isBhkApplicable = (type: string): boolean => {
   ].includes(type);
 };
 
+const generateGUID = (): string => {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
 export const ResalePropertyForm: React.FC<ResalePropertyFormProps> = ({
   initialData,
   onSubmit,
@@ -92,11 +105,14 @@ export const ResalePropertyForm: React.FC<ResalePropertyFormProps> = ({
   existingBuilders = [],
   existingSocieties = [],
   showToast,
+  assignedRegion,
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState<ResalePropertyFormData>(() => {
     // Draft loading has been removed so that Listing Projects form always starts completely empty on open
     return {
+      transactionGuid: initialData?.transactionGuid || generateGUID(),
+      transactionDate: initialData?.transactionDate || new Date().toISOString().split('T')[0],
       propertyHolderName: initialData?.propertyHolderName || "",
       societyName: initialData?.societyName || "",
       location: initialData?.location || "",
@@ -128,6 +144,50 @@ export const ResalePropertyForm: React.FC<ResalePropertyFormProps> = ({
     Partial<Record<keyof ResalePropertyFormData, boolean>>
   >({});
   const [isDetectingLocation, setIsDetectingLocation] = useState(false);
+  const [currentStep, setCurrentStep] = useState(1);
+  const [regionConfirmed, setRegionConfirmed] = useState(false);
+  const [showRegionAlert, setShowRegionAlert] = useState(false);
+
+  const isOutsideRegion = React.useMemo(() => {
+    if (!assignedRegion || !formData.location) return false;
+    return !formData.location.toLowerCase().includes(assignedRegion.toLowerCase());
+  }, [formData.location, assignedRegion]);
+
+  const stepsList = [
+    "Basic Information",
+    "Property Details",
+    "Pricing & Terms",
+    "Media & Document",
+  ];
+
+  const isStepValid = (step: number): boolean => {
+    const stepFields: Record<number, Array<keyof ResalePropertyFormData>> = {
+      1: ["propertyHolderName", "societyName", "location", "builderName", "contactNumber", "transactionDate"],
+      2: ["bhk", "sizeSqft"],
+      3: ["price", "brokeragePercentage"],
+      4: []
+    };
+    
+    const fieldsToValidate = stepFields[step] || [];
+    let stepIsValid = true;
+    const newErrors = { ...errors };
+    const newTouched = { ...touched };
+
+    fieldsToValidate.forEach((field) => {
+      const error = validateField(field, formData[field]);
+      if (error) {
+        newErrors[field] = error;
+        stepIsValid = false;
+      } else {
+        newErrors[field] = "";
+      }
+      newTouched[field] = true;
+    });
+
+    setErrors(newErrors);
+    setTouched(newTouched);
+    return stepIsValid;
+  };
 
   const handleAutoDetectLocation = () => {
     if (!navigator.geolocation) {
@@ -140,10 +200,7 @@ export const ResalePropertyForm: React.FC<ResalePropertyFormProps> = ({
       async (position) => {
         const { latitude, longitude } = position.coords;
         try {
-          const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`,
-          );
-          const data = await response.json();
+          const data = await reverseGeocode(latitude, longitude);
 
           if (data && data.display_name) {
             setFormData((prev) => ({ ...prev, location: data.display_name }));
@@ -279,6 +336,52 @@ export const ResalePropertyForm: React.FC<ResalePropertyFormProps> = ({
     setErrors((prev) => ({ ...prev, [name]: error }));
   };
 
+  const executeSubmit = async () => {
+    try {
+      setIsSubmitting(true);
+      const submissionData = { ...formData };
+      if (isBhkApplicable(formData.propertyType)) {
+        const details = Object.entries(formData.bhkDetails || {}).filter(
+          ([key]) => formData.bhk?.toString().split(", ").includes(key),
+        );
+
+        const sizes = details
+          .map(([_, v]) => Number(v.sizeSqft))
+          .filter((s) => !isNaN(s) && s > 0);
+        submissionData.sizeSqft = sizes.length > 0 ? sizes[0] : "";
+
+        const prices = details
+          .map(([_, v]) => ({
+            price: Number(v.price),
+            unit: v.priceUnit,
+          }))
+          .filter((p) => !isNaN(p.price) && p.price > 0);
+
+        if (prices.length > 0) {
+          submissionData.price = prices[0].price;
+          submissionData.priceUnit = prices[0].unit;
+        } else {
+          submissionData.price = "";
+        }
+      } else {
+        // Clear out bhkDetails if BHK is not applicable
+        submissionData.bhk = "";
+        submissionData.bhkDetails = {};
+      }
+      if (submissionData.brokeragePercentage === "") {
+        submissionData.brokeragePercentage = 0;
+      }
+      await onSubmit(submissionData);
+      if (!initialData) {
+        localStorage.removeItem("draft_resale");
+      }
+    } catch (err) {
+      console.error("Form submission error:", err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
@@ -301,10 +404,11 @@ export const ResalePropertyForm: React.FC<ResalePropertyFormProps> = ({
     // Duplicate check
     const isDuplicate = existingProperties.some(
       (p) =>
-        p.societyName.toLowerCase() === formData.societyName.toLowerCase() &&
+        (p.societyName?.toLowerCase() || '') === (formData.societyName?.toLowerCase() || '') &&
         p.bhk === formData.bhk &&
-        p.floorNumber.toLowerCase() === formData.floorNumber.toLowerCase() &&
-        p.location.toLowerCase() === formData.location.toLowerCase(),
+        (p.floorNumber?.toLowerCase() || '') === (formData.floorNumber?.toLowerCase() || '') &&
+        (p.location?.toLowerCase() || '') === (formData.location?.toLowerCase() || '') &&
+        (p.propertyHolderName?.toLowerCase() || '') === (formData.propertyHolderName?.toLowerCase() || ''),
     );
 
     if (isDuplicate) {
@@ -325,56 +429,153 @@ export const ResalePropertyForm: React.FC<ResalePropertyFormProps> = ({
     setTouched(allTouched);
 
     if (isValid) {
-      try {
-        setIsSubmitting(true);
-        const submissionData = { ...formData };
-        if (isBhkApplicable(formData.propertyType)) {
-          const details = Object.entries(formData.bhkDetails || {}).filter(
-            ([key]) => formData.bhk?.toString().split(", ").includes(key),
-          );
+      if (isOutsideRegion && !regionConfirmed) {
+        setShowRegionAlert(true);
+        return;
+      }
+      await executeSubmit();
+    } else {
+      // Find the first step that contains an error and switch to it
+      const stepFields: Record<number, Array<keyof ResalePropertyFormData>> = {
+        1: ["propertyHolderName", "societyName", "location", "builderName", "contactNumber", "transactionDate"],
+        2: ["bhk", "sizeSqft"],
+        3: ["price", "brokeragePercentage"],
+        4: []
+      };
 
-          const sizes = details
-            .map(([_, v]) => Number(v.sizeSqft))
-            .filter((s) => !isNaN(s) && s > 0);
-          submissionData.sizeSqft = sizes.length > 0 ? sizes[0] : "";
+      for (let s = 1; s <= 4; s++) {
+        const fields = stepFields[s] || [];
+        const hasErrorInStep = fields.some((f) => !!newErrors[f]);
+        if (hasErrorInStep) {
+          setCurrentStep(s);
+          break;
+        }
+      }
 
-          const prices = details
-            .map(([_, v]) => ({
-              price: Number(v.price),
-              unit: v.priceUnit,
-            }))
-            .filter((p) => !isNaN(p.price) && p.price > 0);
-
-          if (prices.length > 0) {
-            submissionData.price = prices[0].price;
-            submissionData.priceUnit = prices[0].unit;
-          } else {
-            submissionData.price = "";
-          }
-        } else {
-          // Clear out bhkDetails if BHK is not applicable
-          submissionData.bhk = "";
-          submissionData.bhkDetails = {};
-        }
-        if (submissionData.brokeragePercentage === "") {
-          submissionData.brokeragePercentage = 0;
-        }
-        await onSubmit(submissionData);
-        if (!initialData) {
-          localStorage.removeItem("draft_resale");
-        }
-      } catch (err) {
-        console.error("Form submission error:", err);
-      } finally {
-        setIsSubmitting(false);
+      // Scroll to top of the form
+      const headerElement = document.getElementById("resale-form-header");
+      if (headerElement) {
+        headerElement.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5" noValidate>
-      {/* Quick Suggestions Section */}
-      <div className="mb-8 space-y-4">
+    <>
+      <form onSubmit={handleSubmit} className="space-y-5" noValidate>
+        {/* Dynamic Progressive Stepper */}
+        <div id="resale-form-header" className="bg-surface border border-border-dim rounded-2xl p-4 md:p-6 mb-6 shadow-sm">
+          {/* Transaction GUID Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border-dim/50 pb-4 mb-5 gap-3">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-amber-primary" />
+            <span className="text-xs font-bold text-text-primary uppercase tracking-wider">Transaction Mode</span>
+          </div>
+          <div className="flex items-center gap-2 font-mono text-[10px] text-text-dim bg-surface-2 px-3 py-1.5 rounded-xl border border-border-bright w-fit">
+            <span className="font-sans text-[9px] uppercase font-bold text-amber-primary">Transaction GUID:</span>
+            <span className="select-all">{formData.transactionGuid}</span>
+          </div>
+        </div>
+
+        {/* Mobile View */}
+        <div className="md:hidden space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-[10px] font-black uppercase tracking-widest text-amber-primary">Step {currentStep} of 4</span>
+              <h4 className="text-sm font-bold text-text-primary">{stepsList[currentStep - 1]}</h4>
+            </div>
+            <div className="text-[11px] font-mono text-text-dim">
+              {Math.round((currentStep / 4) * 100)}% Complete
+            </div>
+          </div>
+          <div className="w-full bg-surface-2 h-1.5 rounded-full overflow-hidden border border-border-bright/20">
+            <div
+              className="bg-amber-primary h-full transition-all duration-300"
+              style={{ width: `${(currentStep / 4) * 100}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Desktop View */}
+        <div className="hidden md:flex items-center justify-between relative">
+          <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-border-dim/50 -translate-y-1/2 z-0" />
+          <div
+            className="absolute top-1/2 left-0 h-0.5 bg-amber-primary/80 -translate-y-1/2 z-0 transition-all duration-300"
+            style={{ width: `${((currentStep - 1) / 3) * 100}%` }}
+          />
+          
+          {stepsList.map((stepName, index) => {
+            const stepNum = index + 1;
+            const isActive = currentStep === stepNum;
+            const isCompleted = currentStep > stepNum;
+            
+            return (
+              <button
+                key={stepNum}
+                type="button"
+                onClick={() => {
+                  if (stepNum < currentStep) {
+                    setCurrentStep(stepNum);
+                  } else if (stepNum > currentStep) {
+                    let valid = true;
+                    for (let s = currentStep; s < stepNum; s++) {
+                      if (!isStepValid(s)) {
+                        valid = false;
+                        break;
+                      }
+                    }
+                    if (valid) {
+                      setCurrentStep(stepNum);
+                    }
+                  }
+                }}
+                className="relative z-10 flex flex-col items-center group focus:outline-none"
+              >
+                <div
+                  className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs border-2 transition-all duration-300 ${
+                    isActive
+                      ? "bg-bg border-amber-primary text-amber-primary shadow-lg shadow-amber-primary/20 scale-110"
+                      : isCompleted
+                      ? "bg-amber-primary border-amber-primary text-bg"
+                      : "bg-surface-2 border-border-bright text-text-dim group-hover:border-text-dim"
+                  }`}
+                >
+                  {isCompleted ? "✓" : stepNum}
+                </div>
+                <span
+                  className={`mt-2 text-[10px] font-bold uppercase tracking-wider transition-colors duration-300 ${
+                    isActive
+                      ? "text-amber-primary"
+                      : isCompleted
+                      ? "text-text-secondary"
+                      : "text-text-dim group-hover:text-text-secondary"
+                  }`}
+                >
+                  {stepName}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Error Summary Alert */}
+      {Object.keys(errors).some((key) => touched[key as keyof ResalePropertyFormData] && !!errors[key as keyof ResalePropertyFormData]) && (
+        <div
+          id="error-summary"
+          className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 text-red-400 text-xs flex items-center gap-2 font-sans"
+        >
+          <AlertCircle size={16} />
+          <span className="font-bold uppercase tracking-wider">
+            Please fix the errors below before saving.
+          </span>
+        </div>
+      )}
+
+      {/* Step 1 Container */}
+      <div style={{ display: currentStep === 1 ? 'block' : 'none' }} className="space-y-5">
+        {/* Quick Suggestions Section */}
+        <div className="mb-8 space-y-4">
         <div className="bg-amber-primary/5 border border-amber-primary/20 rounded-2xl p-6 shadow-sm overflow-hidden relative group">
           <div className="absolute top-0 right-0 w-32 h-32 bg-amber-primary/5 rounded-full -mr-16 -mt-16 blur-[40px]" />
           <div className="relative z-10 flex flex-col md:flex-row gap-6">
@@ -500,6 +701,25 @@ export const ResalePropertyForm: React.FC<ResalePropertyFormProps> = ({
 
           <div className="space-y-1.5">
             <label className="text-[10px] text-text-dim uppercase tracking-wider font-bold flex items-center gap-2">
+              Transaction Date <span className="text-amber-primary">*</span>
+            </label>
+            <div className="relative group">
+              <div className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim group-focus-within:text-amber-primary transition-colors">
+                <Calendar size={14} />
+              </div>
+              <input
+                name="transactionDate"
+                type="date"
+                value={formData.transactionDate}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                className="w-full bg-surface-2 border border-border-bright rounded-xl pl-10 pr-4 py-2 text-sm outline-none transition-all focus:border-amber-primary focus:bg-surface-3"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[10px] text-text-dim uppercase tracking-wider font-bold flex items-center gap-2">
               Society Name <span className="text-amber-primary">*</span>
             </label>
             <div className="relative group">
@@ -563,6 +783,16 @@ export const ResalePropertyForm: React.FC<ResalePropertyFormProps> = ({
             {errors.location && touched.location && (
               <p className="text-[9px] text-red-400 mt-1 flex items-center gap-1">
                 <AlertCircle size={10} /> {errors.location}
+              </p>
+            )}
+            {isOutsideRegion && assignedRegion && !errors.location && (
+              <p className="text-[10px] text-amber-primary/95 mt-1.5 flex items-center gap-1.5 bg-amber-500/5 border border-amber-500/10 px-3 py-1.5 rounded-lg">
+                <AlertCircle size={12} className="shrink-0 animate-pulse text-amber-primary" />
+                <span>
+                  Notice: Location falls outside of your current assigned region (
+                  <span className="font-bold text-text-primary">{assignedRegion}</span>
+                  ).
+                </span>
               </p>
             )}
           </div>
@@ -644,8 +874,11 @@ export const ResalePropertyForm: React.FC<ResalePropertyFormProps> = ({
           </div>
         </div>
       </div>
+      </div>
 
-      {/* Section 2: Property Details */}
+      {/* Step 2 Container */}
+      <div style={{ display: currentStep === 2 ? 'block' : 'none' }} className="space-y-5">
+        {/* Section 2: Property Details */}
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-amber-primary/80">
           <Home size={16} />
@@ -1108,8 +1341,11 @@ export const ResalePropertyForm: React.FC<ResalePropertyFormProps> = ({
           </div>
         </div>
       </div>
+      </div>
 
-      {/* Section 3: Pricing & Terms */}
+      {/* Step 3 Container */}
+      <div style={{ display: currentStep === 3 ? 'block' : 'none' }} className="space-y-5">
+        {/* Section 3: Pricing & Terms */}
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-amber-primary/80">
           <IndianRupee size={16} />
@@ -1248,8 +1484,11 @@ export const ResalePropertyForm: React.FC<ResalePropertyFormProps> = ({
           </div>
         </div>
       </div>
+      </div>
 
-      <div className="space-y-3">
+      {/* Step 4 Container */}
+      <div style={{ display: currentStep === 4 ? 'block' : 'none' }} className="space-y-5">
+        <div className="space-y-3">
         <div className="flex items-center gap-2 text-amber-primary/80">
           <Layers size={16} />
           <h4 className="text-[10px] font-bold uppercase tracking-[0.2em]">
@@ -1280,32 +1519,134 @@ export const ResalePropertyForm: React.FC<ResalePropertyFormProps> = ({
           />
         </div>
       </div>
+      </div>
 
       <div className="pt-4 border-t border-border-dim flex flex-col sm:flex-row justify-between items-center gap-4">
-        <div className="flex items-center gap-2 text-[9px] text-text-dim uppercase tracking-widest font-bold">
-        </div>
-        <div className="flex flex-col sm:flex-row justify-end gap-3 w-full sm:w-auto">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="w-full sm:w-auto px-8 py-2 text-sm font-bold text-text-secondary hover:text-text-primary transition-all rounded-xl hover:bg-surface-2"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className={`w-full sm:w-auto bg-amber-primary text-bg px-10 py-2 rounded-xl text-sm font-bold transition-all shadow-xl shadow-amber-primary/20 flex items-center justify-center gap-2 ${isSubmitting ? "opacity-70 cursor-not-allowed" : "hover:bg-amber-secondary hover:scale-[1.02] active:scale-[0.98]"}`}
-          >
-            {isSubmitting ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <CheckCircle2 className="w-4 h-4" />
-            )}
-            {isSubmitting ? "Saving Changes..." : "Save Listing Projects"}
-          </button>
+        {/* Left: Cancel button */}
+        <button
+          type="button"
+          onClick={onCancel}
+          className="w-full sm:w-auto px-6 py-2.5 text-sm font-bold text-text-secondary hover:text-text-primary transition-all rounded-xl hover:bg-surface-2 border border-border-bright"
+        >
+          Cancel
+        </button>
+
+        {/* Right: Step controls */}
+        <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+          {currentStep > 1 && (
+            <button
+              type="button"
+              onClick={() => {
+                setCurrentStep((prev) => Math.max(1, prev - 1));
+                const formTop = document.getElementById("resale-form-header");
+                if (formTop) {
+                  formTop.scrollIntoView({ behavior: "smooth", block: "start" });
+                }
+              }}
+              className="w-full sm:w-auto px-6 py-2.5 text-sm font-bold text-text-secondary hover:text-text-primary transition-all rounded-xl hover:bg-surface-2 border border-border-bright"
+            >
+              Back
+            </button>
+          )}
+
+          {currentStep < 4 ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (isStepValid(currentStep)) {
+                  setCurrentStep((prev) => Math.min(4, prev + 1));
+                  const formTop = document.getElementById("resale-form-header");
+                  if (formTop) {
+                    formTop.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }
+                } else {
+                  showToast?.("Please complete the required fields in this step", "error");
+                }
+              }}
+              className="w-full sm:w-auto bg-amber-primary text-bg px-8 py-2.5 rounded-xl text-sm font-bold transition-all shadow-xl shadow-amber-primary/20 hover:bg-amber-secondary hover:scale-[1.02] active:scale-[0.98]"
+            >
+              Next Step
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className={`w-full sm:w-auto bg-amber-primary text-bg px-10 py-2.5 rounded-xl text-sm font-bold transition-all shadow-xl shadow-amber-primary/20 flex items-center justify-center gap-2 ${
+                isSubmitting
+                  ? "opacity-70 cursor-not-allowed"
+                  : "hover:bg-amber-secondary hover:scale-[1.02] active:scale-[0.98]"
+              }`}
+            >
+              {isSubmitting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4" />
+              )}
+              {isSubmitting ? "Saving Changes..." : "Save Listing"}
+            </button>
+          )}
         </div>
       </div>
     </form>
-  );
+
+    {showRegionAlert && (
+      <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-bg/80 backdrop-blur-md">
+        <div className="bg-surface border border-amber-500/30 rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-amber-500 to-amber-600" />
+          <div className="flex items-start gap-4 mb-6">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-center text-amber-primary shrink-0 animate-pulse">
+              <AlertCircle size={24} />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-text-primary mb-1">
+                Region Mismatch Warning
+              </h3>
+              <p className="text-xs text-text-dim leading-relaxed">
+                The property location falls outside of your current assigned region:
+              </p>
+              <div className="mt-2.5 px-3 py-2 bg-surface-2 border border-border-bright rounded-xl text-xs font-bold text-text-primary flex items-center justify-between">
+                <span>Assigned Region:</span>
+                <span className="text-amber-primary uppercase tracking-wider">{assignedRegion}</span>
+              </div>
+              <div className="mt-2 px-3 py-2 bg-red-500/5 border border-red-500/10 rounded-xl text-xs text-red-400">
+                <span className="font-semibold text-text-primary">Listed:</span> {formData.location}
+              </div>
+            </div>
+          </div>
+
+          <p className="text-xs text-text-dim mb-6 leading-relaxed">
+            Are you sure you want to proceed and save this resale property listing anyway? This will override regional restrictions.
+          </p>
+
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setShowRegionAlert(false);
+                setRegionConfirmed(false);
+              }}
+              className="flex-1 px-5 py-3 rounded-xl text-xs font-bold text-text-secondary hover:text-text-primary transition-all bg-surface-2 border border-border-bright hover:bg-surface-3"
+            >
+              Go Back & Edit
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                setShowRegionAlert(false);
+                setRegionConfirmed(true);
+                // Wait briefly then submit
+                setTimeout(async () => {
+                  await executeSubmit();
+                }, 100);
+              }}
+              className="flex-1 px-5 py-3 rounded-xl text-xs font-bold text-bg bg-amber-primary hover:bg-amber-secondary transition-all shadow-lg shadow-amber-primary/20"
+            >
+              Confirm & Proceed
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+  </>
+);
 };

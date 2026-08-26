@@ -136,10 +136,11 @@ export class ResalePropertyController {
       // Duplicate check
       const properties = await this.resalePropertyRepository.findAll();
       const existing = properties.find(p => 
-        p.societyName.toLowerCase() === societyName.toLowerCase() && 
+        (p.societyName?.toLowerCase() || '') === (societyName?.toLowerCase() || '') && 
         p.bhk === bhk &&
-        p.floorNumber.toLowerCase() === floorNumber.toLowerCase() &&
-        p.location.toLowerCase() === location.toLowerCase()
+        (p.floorNumber?.toLowerCase() || '') === (floorNumber?.toLowerCase() || '') &&
+        (p.location?.toLowerCase() || '') === (location?.toLowerCase() || '') &&
+        (p.propertyHolderName?.toLowerCase() || '') === (propertyHolderName?.toLowerCase() || '')
       );
 
       if (existing) {
@@ -185,10 +186,10 @@ export class ResalePropertyController {
       if (this.createLog) await this.createLog('CREATE', posterName, `Created resale property: ${societyName} by ${propertyHolderName}`, userId);
       if (this.createNotification) await this.createNotification(null, 'New Resale Property Listed', `${societyName} in ${location} was just listed.`, 'info', userId);
       
-      if (this.sendNewProjectNotification && this.getAdminEmails) {
-        const adminEmails = this.getAdminEmails();
-        if (adminEmails && adminEmails.length > 0) {
-          await this.sendNewProjectNotification(`Resale: ${societyName}`, adminEmails);
+      if (this.sendNewProjectNotification && this.getUserEmail) {
+        const userEmail = this.getUserEmail(posterName);
+        if (userEmail) {
+          await this.sendNewProjectNotification(`Resale: ${societyName}`, [userEmail]);
         }
       }
       

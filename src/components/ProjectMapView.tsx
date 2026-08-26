@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { APIProvider, Map, AdvancedMarker, Pin, InfoWindow, useAdvancedMarkerRef, useMap, useMapsLibrary, MapCameraChangedEvent } from '@vis.gl/react-google-maps';
-import { Building2, Home, MapPin, Maximize2, Tag, User, Search, X, Sparkles } from 'lucide-react';
+import { Building2, Home, MapPin, Maximize2, Tag, User, Search, X, Sparkles, AlertCircle } from 'lucide-react';
 
 const API_KEY = 
   process.env.GOOGLE_MAPS_PLATFORM_KEY || 
@@ -104,9 +104,8 @@ const MarkerWithInfoWindow = ({
         map.panTo(item.coordinates);
         map.setZoom(15);
       }
-      onActive?.(item);
     }
-  }, [selectedItemId, item.id, item.coordinates, map, onActive]);
+  }, [selectedItemId, item.id, item.coordinates, map]);
 
   if (!item.coordinates) return null;
 
@@ -431,6 +430,7 @@ const MapContent: React.FC<MapContentProps> = ({
   const [amenities, setAmenities] = useState<any[]>([]);
   const [isLoadingAmenities, setIsLoadingAmenities] = useState(false);
   const [focusedAmenityId, setFocusedAmenityId] = useState<string | null>(null);
+  const [placesApiError, setPlacesApiError] = useState<string | null>(null);
 
   // Sync activeItem with selectedItemId prop
   useEffect(() => {
@@ -479,9 +479,17 @@ const MapContent: React.FC<MapContentProps> = ({
     })
     .then(({ places }) => {
       setAmenities(places || []);
+      setPlacesApiError(null);
     })
     .catch((err) => {
-      console.error("Failed to fetch nearby amenities:", err);
+      const msg = err?.message || String(err) || '';
+      if (msg.includes('Places API') || msg.includes('blocked') || msg.includes('PERMISSION_DENIED')) {
+        console.warn("Places API (New) is not enabled or blocked. Nearby amenities will not be shown.", msg);
+        setPlacesApiError('Enable Places API (New) in Google Cloud Console for amenities.');
+      } else {
+        console.warn("Failed to fetch nearby amenities:", msg);
+        setPlacesApiError('Failed to fetch amenities.');
+      }
     })
     .finally(() => {
       setIsLoadingAmenities(false);
@@ -568,6 +576,13 @@ const MapContent: React.FC<MapContentProps> = ({
         })}
       </Map>
       <MapSearchControl />
+      
+      {placesApiError && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[100] px-4 py-2 bg-red-500/90 text-white rounded-lg shadow-xl font-medium text-xs text-center border border-red-400">
+          {placesApiError}
+        </div>
+      )}
+
       <AmenityFilterBar 
         selectedCategories={selectedCategories}
         onToggle={(key) => setSelectedCategories(prev => ({ ...prev, [key]: !prev[key] }))}
@@ -695,6 +710,34 @@ const MapContent: React.FC<MapContentProps> = ({
 const ProjectMapView: React.FC<ProjectMapViewProps> = ({ items, onSelectItem, type, selectedItemId }) => {
   const hasValidKey = Boolean(API_KEY) && API_KEY !== 'YOUR_API_KEY';
 
+  const [mapError, setMapError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Intercept Google Maps billing/auth errors
+    (window as any).gm_authFailure = () => {
+      setMapError('Google Maps Authentication or Billing failed. Please check your API key and billing status.');
+    };
+    
+    // Catch specific console errors from Maps API
+    const originalConsoleError = console.error;
+    console.error = (...args) => {
+      const msg = args[0];
+      if (typeof msg === 'string' && msg.includes('BillingNotEnabledMapError')) {
+        setMapError('Google Maps Billing is not enabled for this project. Please enable billing in Google Cloud Console.');
+        return; // Suppress from console to avoid AI Studio error boundary triggering
+      }
+      originalConsoleError.apply(console, args);
+    };
+
+    return () => {
+      console.error = originalConsoleError;
+      delete (window as any).gm_authFailure;
+    };
+  }, []);
+
+  // Filter items that have coordinates
+  const itemsWithCoords = React.useMemo(() => items.filter(item => item.coordinates), [items]);
+
   if (!hasValidKey) {
     return (
       <div className="w-full h-[600px] bg-surface-2 border border-border-dim rounded-2xl flex items-center justify-center p-8 text-center">
@@ -719,9 +762,20 @@ const ProjectMapView: React.FC<ProjectMapViewProps> = ({ items, onSelectItem, ty
     );
   }
 
-  // Filter items that have coordinates
-  const itemsWithCoords = items.filter(item => item.coordinates);
-  
+  if (mapError) {
+    return (
+      <div className="w-full h-[600px] bg-surface-2 border border-border-dim rounded-2xl flex items-center justify-center p-8 text-center">
+        <div className="max-w-md space-y-4">
+          <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto text-red-500">
+            <AlertCircle size={32} />
+          </div>
+          <h3 className="text-xl font-bold text-text-primary">Google Maps Error</h3>
+          <p className="text-text-secondary text-sm">{mapError}</p>
+        </div>
+      </div>
+    );
+  }
+
   // Default center (Gurgaon) if no items or first item
   const defaultCenter = itemsWithCoords.length > 0 && itemsWithCoords[0].coordinates 
     ? itemsWithCoords[0].coordinates 
@@ -754,7 +808,10 @@ const ProjectMapView: React.FC<ProjectMapViewProps> = ({ items, onSelectItem, ty
 
   return (
     <div className="w-full h-[600px] bg-surface-2 border border-border-dim rounded-2xl overflow-hidden relative shadow-2xl">
-      <APIProvider apiKey={API_KEY} version="weekly">
+      <APIProvider apiKey={API_KEY} version="weekly" onError={(err) => {
+        console.error("Google Maps API Error:", err);
+        setMapError('Failed to load Google Maps API. Billing might not be enabled on this project.');
+      }}>
         <MapContent
           itemsWithCoords={itemsWithCoords}
           onSelectItem={onSelectItem}

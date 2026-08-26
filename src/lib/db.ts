@@ -8,8 +8,15 @@ const JSON_PATH = path.join(process.cwd(), 'database.json');
 // Initialize SQLite database
 const sqlite_db = new Database(DB_PATH);
 
-// Create tables for each collection
-const collections = ['projects', 'resaleProperties', 'reports', 'users', 'logs', 'approvals', 'notifications'];
+// Drop notifications table if it exists as this application does not require notifications to be saved in the database
+try {
+  sqlite_db.exec(`DROP TABLE IF EXISTS notifications`);
+} catch (e) {
+  console.error("Error dropping notifications table:", e);
+}
+
+// Create tables for each collection (excluding notifications as it's not saved to database)
+const collections = ['projects', 'resaleProperties', 'reports', 'users', 'logs', 'approvals'];
 
 collections.forEach(col => {
   sqlite_db.exec(`CREATE TABLE IF NOT EXISTS ${col} (id TEXT PRIMARY KEY, data TEXT)`);
@@ -64,10 +71,13 @@ export const getDb = () => {
         data[col] = rows.map(r => JSON.parse(r.data));
       });
 
-      ['lastUserSerial', 'lastProjectSerial', 'lastResalePropertySerial'].forEach(key => {
+      ['lastUserSerial', 'lastProjectSerial', 'lastResalePropertySerial', 'smtp_config'].forEach(key => {
          const row = sqlite_db.prepare(`SELECT value FROM metadata WHERE key = ?`).get(key) as { value: string } | undefined;
-         data[key] = row ? JSON.parse(row.value) : 0;
+         data[key] = row ? JSON.parse(row.value) : (key === 'smtp_config' ? null : 0);
       });
+
+      // Initialize notifications in-memory only (never saved to database)
+      data['notifications'] = [];
 
       inMemoryDb = data;
       return data;
@@ -91,9 +101,10 @@ export const saveDb = (data: any) => {
            })();
         }
       });
-      ['lastUserSerial', 'lastProjectSerial', 'lastResalePropertySerial'].forEach(key => {
+      ['lastUserSerial', 'lastProjectSerial', 'lastResalePropertySerial', 'smtp_config'].forEach(key => {
          const stmt = sqlite_db.prepare(`INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)`);
-         stmt.run(key, JSON.stringify(data[key] || 0));
+         const val = data[key] !== undefined ? data[key] : (key === 'smtp_config' ? null : 0);
+         stmt.run(key, JSON.stringify(val));
       });
       inMemoryDb = data;
       return true;

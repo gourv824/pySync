@@ -162,7 +162,8 @@
       ],
       "createdAt": "2026-04-16T04:57:58.870Z",
       "updatedAt": "2026-04-16T04:57:58.871Z",
-      "lastActive": "2026-04-16T05:20:33.676Z"
+      "lastActive": "2026-04-16T05:20:33.676Z",
+      "status": "Active"
     },
     {
       "id": "2",
@@ -183,7 +184,8 @@
       ],
       "createdAt": "2026-04-16T04:57:58.982Z",
       "updatedAt": "2026-04-16T04:57:58.982Z",
-      "lastActive": "2026-04-16T04:57:58.982Z"
+      "lastActive": "2026-04-16T04:57:58.982Z",
+      "status": "Active"
     },
     {
       "id": "3",
@@ -210,32 +212,11 @@
       ],
       "createdAt": "2026-04-16T04:57:59.088Z",
       "updatedAt": "2026-04-16T04:57:59.088Z",
-      "lastActive": "2026-04-16T04:57:59.088Z"
+      "lastActive": "2026-04-16T04:57:59.088Z",
+      "status": "Active"
     }
   ],
-  "logs": [
-    {
-      "id": "yn2wcx3w8",
-      "action": "LOGIN",
-      "user": "Super Admin",
-      "summary": "User logged in: admin@pysync.local",
-      "timestamp": "2026-04-16T04:58:57.627Z"
-    },
-    {
-      "id": "gdb4hw6pl",
-      "action": "LOGIN",
-      "user": "Super Admin",
-      "summary": "User logged in: admin@pysync.local",
-      "timestamp": "2026-04-16T05:06:41.862Z"
-    },
-    {
-      "id": "xfdg4cx9b",
-      "action": "LOGIN",
-      "user": "Super Admin",
-      "summary": "User logged in: admin@pysync.local",
-      "timestamp": "2026-04-16T05:19:58.572Z"
-    }
-  ],
+  "logs": [],
   "approvals": [],
   "notifications": [],
   "lastUserSerial": 0,

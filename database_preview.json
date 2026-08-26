@@ -217,64 +217,7 @@
       "profilePicture": null
     }
   ],
-  "logs": [
-    {
-      "id": "yn2wcx3w8",
-      "action": "LOGIN",
-      "user": "Super Admin",
-      "summary": "User logged in: admin@pysync.local",
-      "timestamp": "2026-04-16T04:58:57.627Z"
-    },
-    {
-      "id": "gdb4hw6pl",
-      "action": "LOGIN",
-      "user": "Super Admin",
-      "summary": "User logged in: admin@pysync.local",
-      "timestamp": "2026-04-16T05:06:41.862Z"
-    },
-    {
-      "id": "xfdg4cx9b",
-      "action": "LOGIN",
-      "user": "Super Admin",
-      "summary": "User logged in: admin@pysync.local",
-      "timestamp": "2026-04-16T05:19:58.572Z"
-    },
-    {
-      "id": "n2y4pe1aw",
-      "action": "LOGIN",
-      "user": "Super Admin",
-      "summary": "User logged in: admin@pysync.local",
-      "timestamp": "2026-04-17T04:49:33.341Z"
-    },
-    {
-      "id": "pshrb0ed6",
-      "action": "LOGIN",
-      "user": "Super Admin",
-      "summary": "User logged in: admin@pysync.local",
-      "timestamp": "2026-04-17T04:54:29.754Z"
-    },
-    {
-      "id": "0nvo36o7i",
-      "action": "LOGIN",
-      "user": "Super Admin",
-      "summary": "User logged in: admin@pysync.local",
-      "timestamp": "2026-04-17T05:01:01.661Z"
-    },
-    {
-      "id": "d2lt02sz7",
-      "action": "LOGIN",
-      "user": "Super Admin",
-      "summary": "User logged in: admin@pysync.local",
-      "timestamp": "2026-04-17T05:28:32.737Z"
-    },
-    {
-      "id": "wjv8y0gry",
-      "action": "LOGIN",
-      "user": "Super Admin",
-      "summary": "User logged in: admin@pysync.local",
-      "timestamp": "2026-04-17T05:33:50.847Z"
-    }
-  ],
+  "logs": [],
   "approvals": [],
   "notifications": [],
   "lastUserSerial": 0,

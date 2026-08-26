@@ -180,10 +180,10 @@ export class ProjectController {
       if (this.createLog) await this.createLog('CREATE', posterName, `Created project: ${title} (Pending Approval)`, userId);
       if (this.createNotification) await this.createNotification(null, 'New Project (Pending Approval)', `${title} by ${builderName} was listed and is pending approval.`, 'info', userId);
       
-      if (this.sendNewProjectNotification && this.getAdminEmails) {
-        const adminEmails = this.getAdminEmails();
-        if (adminEmails && adminEmails.length > 0) {
-          await this.sendNewProjectNotification(title, adminEmails);
+      if (this.sendNewProjectNotification && this.getUserEmail) {
+        const userEmail = this.getUserEmail(posterName);
+        if (userEmail) {
+          await this.sendNewProjectNotification(title, [userEmail]);
         }
       }
       

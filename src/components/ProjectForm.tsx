@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { geocodeAddress, reverseGeocode } from "../lib/geocoding";
 import { PdfUpload, PdfFile } from "./PdfUpload";
 import { ImageUpload, ImageFile } from "./ImageUpload";
 import { VideoUpload, VideoFile } from "./VideoUpload";
@@ -29,6 +31,8 @@ import { geminiService } from "../services/geminiService";
 import { CustomSelect } from "./CustomSelect";
 
 export interface ProjectFormData {
+  transactionGuid?: string;
+  transactionDate?: string;
   title: string;
   builderName: string;
   projectType: "Residential" | "Commercial";
@@ -332,6 +336,14 @@ export const getPresetAddresses = (market: string, query?: string): any[] => {
   }));
 };
 
+const generateGUID = (): string => {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
 export const ProjectForm: React.FC<ProjectFormProps> = ({
   initialData,
   onSubmit,
@@ -342,6 +354,47 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
   users = [],
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [currentStep, setCurrentStep] = useState(1);
+
+  const stepsList = [
+    "Basic Details",
+    "Property Config",
+    "BHK Configuration",
+    "Payment Plans",
+    "Locations",
+    "Media & Docs"
+  ];
+
+  const isStepValid = (step: number): boolean => {
+    const stepFields: Record<number, Array<keyof ProjectFormData>> = {
+      1: ["title", "builderName", "reraNumber", "transactionDate"],
+      2: ["possessionDate", "launchDate"],
+      3: ["configuration"],
+      4: [],
+      5: ["microMarket", "location", "price", "area"],
+      6: ["pdfs"]
+    };
+    
+    const fieldsToValidate = stepFields[step] || [];
+    let stepIsValid = true;
+    const newErrors = { ...errors };
+    const newTouched = { ...touched };
+
+    fieldsToValidate.forEach((field) => {
+      const error = validateField(field, formData[field]);
+      if (error) {
+        newErrors[field] = error;
+        stepIsValid = false;
+      } else {
+        newErrors[field] = "";
+      }
+      newTouched[field] = true;
+    });
+
+    setErrors(newErrors);
+    setTouched(newTouched);
+    return stepIsValid;
+  };
   const [addressSuggestions, setAddressSuggestions] = useState<any[]>([]);
   const [isSearchingLocation, setIsSearchingLocation] = useState(false);
   const [showAddressDropdown, setShowAddressDropdown] = useState(false);
@@ -355,6 +408,8 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
   const [formData, setFormData] = useState<ProjectFormData>(() => {
     // Draft loading has been removed so that "Project Entry" always starts completely empty on open
     return {
+      transactionGuid: initialData?.transactionGuid || generateGUID(),
+      transactionDate: initialData?.transactionDate || new Date().toISOString().split('T')[0],
       title: initialData?.title || "",
       builderName: initialData?.builderName || "",
       projectType: initialData?.projectType || "Residential",
@@ -445,35 +500,28 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
           searchQuery = searchQuery + ", Haryana";
         }
 
-        const response = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&accept-language=en&countrycodes=in&q=${encodeURIComponent(
-            searchQuery
-          )}`
+        const data = await geocodeAddress(searchQuery);
+        // Safe fallback checking to ensure results belong to Haryana state
+        const haryanaResults = data.filter((item: any) =>
+          item.display_name?.toLowerCase().includes("haryana")
         );
-        if (response.ok) {
-          const data = await response.json();
-          // Safe fallback checking to ensure results belong to Haryana state
-          const haryanaResults = (data || []).filter((item: any) =>
-            item.display_name?.toLowerCase().includes("haryana")
-          );
-          
-          const apiResults = haryanaResults.length > 0 ? haryanaResults : (data || []);
-          
-          // Merge API results with presets
-          const presets = formData.microMarket ? getPresetAddresses(formData.microMarket, formData.location) : [];
-          const seen = new Set();
-          const combined = [...presets];
-          presets.forEach(p => seen.add(p.display_name.toLowerCase()));
-          
-          apiResults.forEach((apiItem: any) => {
-            if (!seen.has(apiItem.display_name.toLowerCase())) {
-              seen.add(apiItem.display_name.toLowerCase());
-              combined.push(apiItem);
-            }
-          });
+        
+        const apiResults = haryanaResults.length > 0 ? haryanaResults : data;
+        
+        // Merge API results with presets
+        const presets = formData.microMarket ? getPresetAddresses(formData.microMarket, formData.location) : [];
+        const seen = new Set();
+        const combined = [...presets];
+        presets.forEach(p => seen.add(p.display_name.toLowerCase()));
+        
+        apiResults.forEach((apiItem: any) => {
+          if (!seen.has(apiItem.display_name.toLowerCase())) {
+            seen.add(apiItem.display_name.toLowerCase());
+            combined.push(apiItem);
+          }
+        });
 
-          setAddressSuggestions(combined);
-        }
+        setAddressSuggestions(combined);
       } catch (err) {
         console.error("Failed to fetch location suggestions:", err);
       } finally {
@@ -516,35 +564,28 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
           searchQuery = searchQuery + ", Haryana";
         }
 
-        const response = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&accept-language=en&countrycodes=in&q=${encodeURIComponent(
-            searchQuery
-          )}`
+        const data = await geocodeAddress(searchQuery);
+        // Safe fallback checking to ensure results belong to Haryana state
+        const haryanaResults = data.filter((item: any) =>
+          item.display_name?.toLowerCase().includes("haryana")
         );
-        if (response.ok) {
-          const data = await response.json();
-          // Safe fallback checking to ensure results belong to Haryana state
-          const haryanaResults = (data || []).filter((item: any) =>
-            item.display_name?.toLowerCase().includes("haryana")
-          );
-          
-          const apiResults = haryanaResults.length > 0 ? haryanaResults : (data || []);
-          
-          // Merge API results with presets
-          const presets = formData.microMarket ? getPresetSectors(formData.microMarket, formData.sector) : [];
-          const seen = new Set();
-          const combined = [...presets];
-          presets.forEach(p => seen.add(p.display_name.toLowerCase()));
-          
-          apiResults.forEach((apiItem: any) => {
-            if (!seen.has(apiItem.display_name.toLowerCase())) {
-              seen.add(apiItem.display_name.toLowerCase());
-              combined.push(apiItem);
-            }
-          });
+        
+        const apiResults = haryanaResults.length > 0 ? haryanaResults : data;
+        
+        // Merge API results with presets
+        const presets = formData.microMarket ? getPresetSectors(formData.microMarket, formData.sector) : [];
+        const seen = new Set();
+        const combined = [...presets];
+        presets.forEach(p => seen.add(p.display_name.toLowerCase()));
+        
+        apiResults.forEach((apiItem: any) => {
+          if (!seen.has(apiItem.display_name.toLowerCase())) {
+            seen.add(apiItem.display_name.toLowerCase());
+            combined.push(apiItem);
+          }
+        });
 
-          setSectorSuggestions(combined);
-        }
+        setSectorSuggestions(combined);
       } catch (err) {
         console.error("Failed to fetch sector suggestions:", err);
       } finally {
@@ -645,10 +686,7 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
       async (position) => {
         const { latitude, longitude } = position.coords;
         try {
-          const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`,
-          );
-          const data = await response.json();
+          const data = await reverseGeocode(latitude, longitude);
 
           if (data && data.display_name) {
             setFormData((prev) => ({ ...prev, location: data.display_name }));
@@ -747,18 +785,12 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
       } else {
         searchQuery = `${market}, Gurugram`;
       }
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&accept-language=en&countrycodes=in&q=${encodeURIComponent(
-          searchQuery + ", Haryana"
-        )}`
+      const data = await geocodeAddress(searchQuery + ", Haryana");
+      const haryanaResults = data.filter((item: any) =>
+        item.display_name?.toLowerCase().includes("haryana")
       );
-      if (response.ok) {
-        const data = await response.json();
-        const haryanaResults = (data || []).filter((item: any) =>
-          item.display_name?.toLowerCase().includes("haryana")
-        );
-        const bestResult = haryanaResults[0] || data?.[0];
-        if (bestResult) {
+      const bestResult = haryanaResults[0] || data[0];
+      if (bestResult) {
           selectedFromDropdownRef.current = true;
           setFormData((prev) => ({
             ...prev,
@@ -774,12 +806,6 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
             location: `${market}, Gurugram, Haryana, India`,
           }));
         }
-      } else {
-        setFormData((prev) => ({
-          ...prev,
-          location: `${market}, Gurugram, Haryana, India`,
-        }));
-      }
     } catch (err) {
       console.error("Failed to auto-fetch micro market location:", err);
       setFormData((prev) => ({
@@ -878,6 +904,25 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
         setIsSubmitting(false);
       }
     } else {
+      // Find the first step that contains an error and switch to it
+      const stepFields: Record<number, Array<keyof ProjectFormData>> = {
+        1: ["title", "builderName", "reraNumber", "transactionDate"],
+        2: ["possessionDate", "launchDate"],
+        3: ["configuration"],
+        4: [],
+        5: ["microMarket", "location", "price", "area"],
+        6: ["pdfs"]
+      };
+
+      for (let s = 1; s <= 6; s++) {
+        const fields = stepFields[s] || [];
+        const hasErrorInStep = fields.some((f) => !!newErrors[f]);
+        if (hasErrorInStep) {
+          setCurrentStep(s);
+          break;
+        }
+      }
+
       // Scroll to top to show error summary
       const errorSummary = document.getElementById("error-summary");
       if (errorSummary) {
@@ -922,7 +967,117 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5" noValidate>
-      {/* Quick Suggestions Section */}
+      {/* Dynamic Progressive Stepper */}
+      <div id="project-form-header" className="bg-surface border border-border-dim rounded-2xl p-4 md:p-6 mb-6 shadow-sm">
+        {/* Transaction GUID Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border-dim/50 pb-4 mb-5 gap-3">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-amber-primary" />
+            <span className="text-xs font-bold text-text-primary uppercase tracking-wider">Transaction Mode</span>
+          </div>
+          <div className="flex items-center gap-2 font-mono text-[10px] text-text-dim bg-surface-2 px-3 py-1.5 rounded-xl border border-border-bright w-fit">
+            <span className="font-sans text-[9px] uppercase font-bold text-amber-primary">Transaction GUID:</span>
+            <span className="select-all">{formData.transactionGuid}</span>
+          </div>
+        </div>
+
+        {/* Mobile View */}
+        <div className="md:hidden space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-[10px] font-black uppercase tracking-widest text-amber-primary">Step {currentStep} of 6</span>
+              <h4 className="text-sm font-bold text-text-primary">{stepsList[currentStep - 1]}</h4>
+            </div>
+            <div className="text-[11px] font-mono text-text-dim">
+              {Math.round((currentStep / 6) * 100)}% Complete
+            </div>
+          </div>
+          <div className="w-full bg-surface-2 h-1.5 rounded-full overflow-hidden border border-border-bright/20">
+            <div
+              className="bg-amber-primary h-full transition-all duration-300"
+              style={{ width: `${(currentStep / 6) * 100}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Desktop View */}
+        <div className="hidden md:flex items-center justify-between relative">
+          <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-border-dim/50 -translate-y-1/2 z-0" />
+          <div
+            className="absolute top-1/2 left-0 h-0.5 bg-amber-primary/80 -translate-y-1/2 z-0 transition-all duration-300"
+            style={{ width: `${((currentStep - 1) / 5) * 100}%` }}
+          />
+          
+          {stepsList.map((stepName, index) => {
+            const stepNum = index + 1;
+            const isActive = currentStep === stepNum;
+            const isCompleted = currentStep > stepNum;
+            
+            return (
+              <button
+                key={stepNum}
+                type="button"
+                onClick={() => {
+                  if (stepNum < currentStep) {
+                    setCurrentStep(stepNum);
+                  } else if (stepNum > currentStep) {
+                    let valid = true;
+                    for (let s = currentStep; s < stepNum; s++) {
+                      if (!isStepValid(s)) {
+                        valid = false;
+                        break;
+                      }
+                    }
+                    if (valid) {
+                      setCurrentStep(stepNum);
+                    }
+                  }
+                }}
+                className="relative z-10 flex flex-col items-center group focus:outline-none"
+              >
+                <div
+                  className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs border-2 transition-all duration-300 ${
+                    isActive
+                      ? "bg-bg border-amber-primary text-amber-primary shadow-lg shadow-amber-primary/20 scale-110"
+                      : isCompleted
+                      ? "bg-amber-primary border-amber-primary text-bg"
+                      : "bg-surface-2 border-border-bright text-text-dim group-hover:border-text-dim"
+                  }`}
+                >
+                  {isCompleted ? "✓" : stepNum}
+                </div>
+                <span
+                  className={`mt-2 text-[10px] font-bold uppercase tracking-wider transition-colors duration-300 ${
+                    isActive
+                      ? "text-amber-primary"
+                      : isCompleted
+                      ? "text-text-secondary"
+                      : "text-text-dim group-hover:text-text-secondary"
+                  }`}
+                >
+                  {stepName}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {Object.keys(errors).some((key) => touched[key as keyof ProjectFormData] && !!errors[key as keyof ProjectFormData]) && (
+        <div
+          id="error-summary"
+          className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 text-red-400 text-xs flex items-center gap-2"
+        >
+          <AlertCircle size={16} />
+          <span className="font-bold uppercase tracking-wider">
+            Please fix the errors below before saving.
+          </span>
+        </div>
+      )}
+
+      {/* Step 1 Container */}
+      <div style={{ display: currentStep === 1 ? 'block' : 'none' }} className="space-y-5">
+        {/* Quick Suggestions Section */}
       <div className="mb-8 space-y-4">
         <div className="bg-amber-primary/5 border border-amber-primary/20 rounded-2xl p-6 shadow-sm overflow-hidden relative group">
           <div className="absolute top-0 right-0 w-32 h-32 bg-amber-primary/5 rounded-full -mr-16 -mt-16 blur-[40px]" />
@@ -1033,7 +1188,7 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
           </h4>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          <div className="space-y-1.5 md:col-span-2">
+          <div className="space-y-1.5 md:col-span-1">
             <label
               htmlFor="title"
               className="text-[10px] text-text-dim uppercase tracking-wider font-bold flex items-center gap-1.5"
@@ -1074,6 +1229,29 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
               <div className="text-[9px] text-text-dim ml-auto">
                 {formData.title.length}/100
               </div>
+            </div>
+          </div>
+
+          <div className="space-y-1.5 md:col-span-1">
+            <label
+              htmlFor="transactionDate"
+              className="text-[10px] text-text-dim uppercase tracking-wider font-bold flex items-center gap-1.5"
+            >
+              <Calendar size={12} className="text-amber-primary/70" /> Transaction Date <span className="text-amber-primary">*</span>
+            </label>
+            <div className="relative group">
+              <div className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim group-focus-within:text-amber-primary transition-colors">
+                <Calendar size={14} />
+              </div>
+              <input
+                id="transactionDate"
+                name="transactionDate"
+                type="date"
+                value={formData.transactionDate}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                className="w-full bg-surface-2 border border-border-bright rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none transition-all focus:border-amber-primary focus:bg-surface-3"
+              />
             </div>
           </div>
 
@@ -1195,10 +1373,23 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
               placeholder="Select Sub-Type..."
             />
           </div>
+        </div>
+      </div>
+      </div>
 
-          <div className="space-y-1.5">
-            <label
-              htmlFor="possessionStatus"
+      {/* Step 2 Container */}
+      <div style={{ display: currentStep === 2 ? 'block' : 'none' }} className="space-y-5">
+        <div className="bg-surface border border-border-dim rounded-2xl p-6 space-y-5 shadow-sm">
+          <div className="flex items-center gap-2 text-amber-primary border-b border-border-dim pb-3 mb-4">
+            <Key size={18} />
+            <h4 className="text-xs font-bold uppercase tracking-[0.15em]">
+              Possession & Status
+            </h4>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="space-y-1.5">
+              <label
+                htmlFor="possessionStatus"
               className="text-[10px] text-text-dim uppercase tracking-wider font-bold flex items-center gap-1.5"
             >
               <Key size={12} className="text-amber-primary/70" /> Possession
@@ -1430,8 +1621,33 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
             </div>
           </div>
         </div>
+      </div>
+      </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-1 gap-5">
+      {/* Step 3: BHK Configuration */}
+      <div style={{ display: currentStep === 3 ? 'block' : 'none' }} className="space-y-5">
+        {!isBhkApplicable(formData.subType) ? (
+          <div className="bg-surface border border-border-dim rounded-2xl p-8 text-center space-y-4 shadow-sm animate-in fade-in slide-in-from-top-2">
+            <div className="w-16 h-16 bg-amber-primary/10 rounded-full flex items-center justify-center mx-auto text-amber-primary">
+              <Info size={32} />
+            </div>
+            <div className="space-y-2 max-w-md mx-auto">
+              <h4 className="text-sm font-bold text-text-primary">BHK Configuration Not Applicable</h4>
+              <p className="text-xs text-text-dim leading-relaxed">
+                BHK options are only applicable for residential properties (Apartments, Villas, Independent Floors).
+                For <span className="text-amber-primary font-semibold">{formData.subType}</span>, please click <span className="font-bold text-text-primary">Next</span> to proceed to payment plans.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-surface border border-border-dim rounded-2xl p-6 space-y-5 shadow-sm">
+            <div className="flex items-center gap-2 text-amber-primary border-b border-border-dim pb-3 mb-4">
+              <Home size={18} />
+              <h4 className="text-xs font-bold uppercase tracking-[0.15em]">
+                BHK Configurations
+              </h4>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-1 gap-5">
           {(formData.subType === "Apartments" ||
             formData.subType === "Villas" ||
             formData.subType === "Independent Floors") && (
@@ -1721,9 +1937,13 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
               )}
             </div>
           )}
-        </div>
+            </div>
+          </div>
+        )}
       </div>
 
+      {/* Step 4 Container */}
+      <div style={{ display: currentStep === 4 ? 'block' : 'none' }} className="space-y-5">
       {/* Section: Payment Plans */}
       <div className="bg-surface border border-border-dim rounded-2xl p-6 space-y-6 shadow-sm">
         <div className="flex items-center gap-2 text-amber-primary border-b border-border-dim pb-3 mb-4">
@@ -3068,7 +3288,10 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
           )}
         </div>
       </div>
+      </div>
 
+      {/* Step 5 Container */}
+      <div style={{ display: currentStep === 5 ? 'block' : 'none' }} className="space-y-5">
       {/* Section 3: Location */}
       <div className="bg-surface border border-border-dim rounded-2xl p-6 space-y-5 shadow-sm">
         <div className="flex items-center gap-2 text-amber-primary border-b border-border-dim pb-3 mb-4">
@@ -3407,7 +3630,10 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
           )}
         </div>
       </div>
+      </div>
 
+      {/* Step 6 Container */}
+      <div style={{ display: currentStep === 6 ? 'block' : 'none' }} className="space-y-5">
       {/* Section 4: Media & Documents */}
       <div className="bg-surface border border-border-dim rounded-2xl p-6 space-y-5 shadow-sm">
         <div className="flex items-center gap-2 text-amber-primary border-b border-border-dim pb-3 mb-4">
@@ -3470,34 +3696,72 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
           />
         </div>
       </div>
+      </div>
 
       <div className="pt-6 border-t border-border-dim flex flex-col sm:flex-row justify-between items-center gap-4">
-        <div className="flex items-center gap-2 text-[9px] text-text-dim uppercase tracking-widest font-bold">
-        </div>
-        <div className="flex flex-col sm:flex-row justify-end gap-3 w-full sm:w-auto">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="w-full sm:w-auto px-8 py-2.5 text-sm font-bold text-text-secondary hover:text-text-primary transition-all rounded-xl hover:bg-surface-2 border border-border-bright sm:border-transparent"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className={`w-full sm:w-auto bg-amber-primary text-bg px-10 py-2.5 rounded-xl text-sm font-bold transition-all shadow-xl shadow-amber-primary/20 flex items-center justify-center gap-2 ${
-              isSubmitting
-                ? "opacity-70 cursor-not-allowed"
-                : "hover:bg-amber-secondary hover:scale-[1.02] active:scale-[0.98]"
-            }`}
-          >
-            {isSubmitting ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <CheckCircle2 className="w-4 h-4" />
-            )}
-            {isSubmitting ? "Saving Changes..." : "Save Project"}
-          </button>
+        {/* Left: Cancel button */}
+        <button
+          type="button"
+          onClick={onCancel}
+          className="w-full sm:w-auto px-6 py-2.5 text-sm font-bold text-text-secondary hover:text-text-primary transition-all rounded-xl hover:bg-surface-2 border border-border-bright"
+        >
+          Cancel
+        </button>
+
+        {/* Right: Step controls */}
+        <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+          {currentStep > 1 && (
+            <button
+              type="button"
+              onClick={() => {
+                setCurrentStep((prev) => Math.max(1, prev - 1));
+                const formTop = document.getElementById("project-form-header");
+                if (formTop) {
+                  formTop.scrollIntoView({ behavior: "smooth", block: "start" });
+                }
+              }}
+              className="w-full sm:w-auto px-6 py-2.5 text-sm font-bold text-text-secondary hover:text-text-primary transition-all rounded-xl hover:bg-surface-2 border border-border-bright"
+            >
+              Back
+            </button>
+          )}
+
+          {currentStep < 6 ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (isStepValid(currentStep)) {
+                  setCurrentStep((prev) => Math.min(6, prev + 1));
+                  const formTop = document.getElementById("project-form-header");
+                  if (formTop) {
+                    formTop.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }
+                } else {
+                  showToast?.("Please complete the required fields in this step", "error");
+                }
+              }}
+              className="w-full sm:w-auto bg-amber-primary text-bg px-8 py-2.5 rounded-xl text-sm font-bold transition-all shadow-xl shadow-amber-primary/20 hover:bg-amber-secondary hover:scale-[1.02] active:scale-[0.98]"
+            >
+              Next Step
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className={`w-full sm:w-auto bg-amber-primary text-bg px-10 py-2.5 rounded-xl text-sm font-bold transition-all shadow-xl shadow-amber-primary/20 flex items-center justify-center gap-2 ${
+                isSubmitting
+                  ? "opacity-70 cursor-not-allowed"
+                  : "hover:bg-amber-secondary hover:scale-[1.02] active:scale-[0.98]"
+              }`}
+            >
+              {isSubmitting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4" />
+              )}
+              {isSubmitting ? "Saving Changes..." : "Save Project"}
+            </button>
+          )}
         </div>
       </div>
     </form>

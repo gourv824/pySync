@@ -153,8 +153,8 @@ export async function uploadFileToCdn(
     // --- FALLBACK TO LOCAL DIRECTORY STORE ---
     console.log("MinIO is not available. Falling back to local filesystem store.");
     
-    // Ensure public uploads directory exists
-    const localUploadsDir = path.join(process.cwd(), 'dist', 'uploads');
+    // Ensure persistent uploads directory exists outside dist
+    const localUploadsDir = path.join(process.cwd(), 'uploads');
     if (!fs.existsSync(localUploadsDir)) {
       fs.mkdirSync(localUploadsDir, { recursive: true });
     }
@@ -164,8 +164,7 @@ export async function uploadFileToCdn(
     fs.writeFileSync(localFilePath, buffer);
 
     // Build local serving URL
-    const appUrl = (process.env.APP_URL || '').replace(/\/$/, '') || 'http://localhost:3000';
-    const localUrl = `${appUrl}/uploads/${localFileName}`;
+    const localUrl = `/uploads/${localFileName}`;
     console.log(`Saved file to local directory. URL: ${localUrl}`);
     return localUrl;
 

@@ -3,8 +3,10 @@ export interface User {
   name: string;
   email: string;
   username: string;
-  role: 'admin' | 'employee' | 'team leader';
+  role: 'admin' | 'employee' | 'team leader' | 'team_leader';
   passwordHash: string;
+  status?: 'Active' | 'Pending Approval' | 'Rejected' | 'Pending';
+  phoneNumber?: string;
   mustResetPassword?: boolean;
   createdAt: string;
   updatedAt: string;

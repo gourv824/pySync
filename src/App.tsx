@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Component, useRef } from "react";
+import React, { useState, useEffect, useMemo, Component, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
   LayoutDashboard,
@@ -34,6 +34,7 @@ import {
   Bell,
   Menu,
   Filter,
+  SlidersHorizontal,
   LayoutGrid,
   List,
   FileQuestion,
@@ -43,6 +44,7 @@ import {
   Layout,
   Bath,
   Maximize2,
+  Minimize2,
   X,
   CheckCircle2,
   Info,
@@ -55,10 +57,14 @@ import {
   RefreshCw,
   Minus,
   Mail,
+  Send,
   Key,
   Settings,
   Maximize,
+  Minimize,
   Moon,
+  Sun,
+  Monitor,
   Type,
   Zap,
   Globe,
@@ -66,16 +72,36 @@ import {
   Save,
   Volume2,
   HelpCircle,
+  Keyboard,
   BarChart as BarChartIcon,
   Database as DatabaseIcon,
   Smartphone,
   Sparkles,
   Percent,
+  Server,
+  Terminal,
+  Copy,
+  Cpu,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+  ExternalLink,
+  QrCode,
+  Phone,
+  Camera,
+  Share2,
+  History,
+  Lock,
+  BadgeCheck,
+  TrendingUp,
+  TrendingDown,
+  ArrowUpRight,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import SimpleMDE from "react-simplemde-editor";
 import "easymde/dist/easymde.min.css";
 import Markdown from "react-markdown";
+import QRCode from "qrcode";
 import {
   BarChart,
   Bar,
@@ -94,14 +120,18 @@ import { ProjectForm, defaultPaymentPlans } from "./components/ProjectForm";
 import { ResalePropertyForm } from "./components/ResalePropertyForm";
 import ProjectMapView from "./components/ProjectMapView";
 import { PdfFile } from "./components/PdfUpload";
+import { ProgressRoadmap } from "./components/ProgressRoadmap";
 import { CredentialManager } from "./components/credentials/CredentialManager";
 import { CredentialForm } from "./components/credentials/CredentialForm";
 import { CredentialGenerationCard } from "./components/credentials/CredentialGenerationCard";
+import { UserCredentials } from "./components/credentials/types";
 import {
   LoginForm,
-  RegisterForm,
   ForgotPasswordForm,
 } from "./components/credentials/AuthScreens";
+import { MediaExplorer } from "./components/MediaExplorer";
+import { InlineImageCarousel } from "./components/InlineImageCarousel";
+import { DeveloperPortfolioModal } from "./components/DeveloperPortfolioModal";
 
 // --- Types ---
 const HighlightText = ({
@@ -149,6 +179,7 @@ interface User {
   email: string;
   username: string;
   role: Role;
+  status?: "Active" | "Pending Approval" | "Rejected" | "Pending";
   mustResetPassword?: boolean;
   lastActive?: string;
   profilePicture?: string;
@@ -319,14 +350,14 @@ const hasPermission = (user: User | null, permission: string) => {
 
 // --- Components ---
 
-const SidebarItem = ({ icon: Icon, label, active, onClick, badge }: any) => (
+const SidebarItem = ({ icon: Icon, label, active, onClick, badge, className = "" }: any) => (
   <button
     onClick={onClick}
     className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-md transition-all duration-200 group ${
       active
         ? "bg-amber-primary/10 border border-amber-primary/30 text-amber-primary"
         : "text-text-secondary hover:bg-surface-2 hover:text-text-primary border border-transparent"
-    }`}
+    } ${className}`}
   >
     <Icon
       size={18}
@@ -338,7 +369,7 @@ const SidebarItem = ({ icon: Icon, label, active, onClick, badge }: any) => (
     />
     <span className="text-[13px] font-medium">{label}</span>
     {badge > 0 && (
-      <span className="ml-auto bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full min-w-[18px]">
+      <span className="ml-auto bg-amber-primary text-black font-black text-[10px] px-1.5 py-0.5 rounded-full min-w-[18px] text-center shadow-sm animate-breathe">
         {badge}
       </span>
     )}
@@ -352,81 +383,157 @@ const KpiCard = ({
   icon: Icon,
   trend,
   color = "amber",
+  externalLink,
 }: any) => {
-  const colorClasses: any = {
-    amber: "text-amber-primary bg-amber-primary/10 border-amber-primary/20",
-    blue: "text-blue-500 bg-blue-500/10 border-blue-500/20",
-    green: "text-green-500 bg-green-500/10 border-green-500/20",
-    purple: "text-purple-500 bg-purple-500/10 border-purple-500/20",
-    red: "text-red-500 bg-red-500/10 border-red-500/20",
+  const colorThemes: any = {
+    amber: {
+      text: "text-amber-400",
+      bg: "bg-amber-400/10",
+      border: "border-amber-400/25",
+      glow: "from-amber-500/15 via-amber-500/5 to-transparent",
+      badge: "bg-amber-500/10 text-amber-400 border-amber-500/30",
+    },
+    blue: {
+      text: "text-sky-400",
+      bg: "bg-sky-400/10",
+      border: "border-sky-400/25",
+      glow: "from-sky-500/15 via-sky-500/5 to-transparent",
+      badge: "bg-sky-500/10 text-sky-400 border-sky-500/30",
+    },
+    green: {
+      text: "text-emerald-400",
+      bg: "bg-emerald-400/10",
+      border: "border-emerald-400/25",
+      glow: "from-emerald-500/15 via-emerald-500/5 to-transparent",
+      badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+    },
+    purple: {
+      text: "text-purple-400",
+      bg: "bg-purple-400/10",
+      border: "border-purple-400/25",
+      glow: "from-purple-500/15 via-purple-500/5 to-transparent",
+      badge: "bg-purple-500/10 text-purple-400 border-purple-500/30",
+    },
+    red: {
+      text: "text-rose-400",
+      bg: "bg-rose-400/10",
+      border: "border-rose-400/25",
+      glow: "from-rose-500/15 via-rose-500/5 to-transparent",
+      badge: "bg-rose-500/10 text-rose-400 border-rose-500/30",
+    },
   };
+
+  const theme = colorThemes[color] || colorThemes.amber;
+
+  const CardContent = (
+    <>
+      <div
+        className={`absolute top-0 right-0 w-36 h-36 bg-gradient-to-br ${theme.glow} rounded-full -mr-12 -mt-12 blur-2xl group-hover:scale-150 transition-transform duration-700 pointer-events-none`}
+      />
+      <div className="absolute inset-0 bg-gradient-to-b from-white/[0.03] to-transparent pointer-events-none" />
+      <div className="relative z-10 flex flex-col justify-between h-full">
+        <div className="flex items-center justify-between mb-4">
+          <div
+            className={`w-10 h-10 rounded-xl flex items-center justify-center border ${theme.bg} ${theme.border} ${theme.text} transition-transform group-hover:scale-110 shadow-sm backdrop-blur-sm`}
+          >
+            {Icon && <Icon size={18} />}
+          </div>
+          {trend !== undefined && trend !== null && (
+            <div
+              className={`flex items-center gap-1 text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full border shadow-sm ${
+                trend > 0
+                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                  : "bg-rose-500/10 text-rose-400 border-rose-500/30"
+              }`}
+            >
+              {trend > 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
+              <span>{trend > 0 ? `+${trend}%` : `${trend}%`}</span>
+            </div>
+          )}
+          {externalLink && (
+            <div className="text-[9px] font-mono font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 group-hover:bg-emerald-500 group-hover:text-black transition-all shadow-sm">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse group-hover:bg-black" />
+              <span>LIVE BUCKET</span>
+              <ExternalLink size={10} />
+            </div>
+          )}
+          {typeof label === "string" && (label.toLowerCase().includes("pending") || label.toLowerCase().includes("approval")) && Number(value) > 0 && (
+            <div className="flex items-center gap-1.5 text-[9px] font-mono font-bold px-2 py-0.5 rounded-full border border-amber-500/50 bg-amber-500/15 text-amber-300 shadow-sm animate-breathe">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-breathe-dot" />
+              <span>Action Req</span>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-1.5">
+          <div className="text-[10px] text-text-dim uppercase tracking-[0.2em] font-mono font-bold flex items-center justify-between">
+            <span>{label}</span>
+          </div>
+          <div className="text-2xl sm:text-3xl font-bold text-text-primary tracking-tight font-sans">
+            {value}
+          </div>
+          <div className="text-[11px] text-text-secondary font-medium flex items-center gap-1.5 pt-0.5">
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                trend && trend > 0
+                  ? "bg-emerald-400 animate-pulse shadow-[0_0_6px_rgba(52,211,153,0.8)]"
+                  : "bg-amber-primary"
+              }`}
+            />
+            <span className="truncate">{sub}</span>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+
+  const cardClasses =
+    "bg-surface-2/60 border border-border-bright hover:border-amber-primary/40 p-5 rounded-2xl relative overflow-hidden group shadow-lg transition-all backdrop-blur-md";
+
+  if (externalLink) {
+    return (
+      <motion.a
+        href={externalLink}
+        target="_blank"
+        rel="noopener noreferrer"
+        initial={{ opacity: 0, y: 15 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, ease: "easeOut" }}
+        whileHover={{ y: -3, transition: { duration: 0.2 } }}
+        className={`${cardClasses} block cursor-pointer`}
+      >
+        {CardContent}
+      </motion.a>
+    );
+  }
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, ease: "easeOut" }}
-      whileHover={{ y: -4, transition: { duration: 0.2 } }}
-      className="bg-3d border-3d shadow-3d p-6 rounded-[24px] relative overflow-hidden group"
+      transition={{ duration: 0.4, ease: "easeOut" }}
+      whileHover={{ y: -3, transition: { duration: 0.2 } }}
+      className={cardClasses}
     >
-      {/* Scanning Line Animation */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-0 group-hover:opacity-100 transition-opacity duration-500">
-        <div className="absolute top-0 left-0 w-full h-1/2 bg-gradient-to-b from-transparent via-amber-primary/10 to-transparent " />
-      </div>
-
-      <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-white/5 to-transparent rounded-full -mr-12 -mt-12 blur-2xl group-hover:bg-white/10 transition-all" />
-
-      <div className="flex items-start justify-between mb-4">
-        <div
-          className={`p-3 rounded-xl border ${colorClasses[color] || colorClasses.amber} transition-transform group-hover:scale-110`}
-        >
-          {Icon && <Icon size={20} />}
-        </div>
-        {trend && (
-          <div
-            className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg ${trend > 0 ? "bg-green-500/10 text-green-500" : "bg-red-500/10 text-red-500"}`}
-          >
-            {trend > 0 ? "↑" : "↓"} {Math.abs(trend)}%
-          </div>
-        )}
-      </div>
-
-      <div className="space-y-1">
-        <div className="text-[10px] text-text-dim uppercase tracking-[0.2em] font-bold">
-          {label}
-        </div>
-        <div className="flex items-baseline gap-2">
-          <div className="text-3xl font-serif font-bold text-text-primary tracking-tight">
-            {value}
-          </div>
-        </div>
-        <div className="text-[10px] text-text-secondary font-medium flex items-center gap-1.5 mt-2">
-          <div
-            className={`w-1.5 h-1.5 rounded-full ${trend && trend > 0 ? "bg-green-500 animate-pulse" : "bg-amber-primary"}`}
-          />
-          {sub}
-        </div>
-      </div>
+      {CardContent}
     </motion.div>
   );
 };
 
 const DashboardSection = ({ title, icon: Icon, children, action }: any) => (
-  <div className="bg-3d border-3d rounded-[24px] overflow-hidden shadow-3d relative">
-    <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent pointer-events-none" />
-    <div className="px-6 py-4 border-b border-black/30 flex justify-between items-center bg-surface-2/30 relative z-10">
-      <h3 className="text-xs font-bold text-text-primary uppercase tracking-[0.2em] flex items-center gap-3 drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">
+  <div className="bg-surface/80 border border-border-bright rounded-2xl overflow-hidden shadow-lg backdrop-blur-sm relative">
+    <div className="px-5 py-3.5 border-b border-border-dim/40 flex justify-between items-center bg-surface-2/40 relative z-10">
+      <h3 className="text-xs font-bold text-text-primary uppercase tracking-wider flex items-center gap-2.5">
         {Icon && (
-          <Icon
-            size={16}
-            className="text-amber-primary drop-shadow-[0_0_5px_rgba(245,158,11,0.5)]"
-          />
+          <div className="p-1 rounded-lg bg-amber-primary/10 border border-amber-primary/20 text-amber-primary">
+            <Icon size={14} />
+          </div>
         )}
-        {title}
+        <span>{title}</span>
       </h3>
-      <div className="relative z-10">{action}</div>
+      {action && <div className="relative z-10">{action}</div>}
     </div>
-    <div className="p-6 relative z-10">{children}</div>
+    <div className="p-5 relative z-10">{children}</div>
   </div>
 );
 
@@ -459,13 +566,7 @@ class ErrorBoundary extends Component<any, any> {
             </p>
             <div className="bg-surface-2 p-4 rounded-xl border border-border-dim text-left overflow-auto max-h-40">
               <code className="text-[10px] text-red-400 font-mono">
-                {(() => {
-                  const errorValue: unknown = this.state.error;
-                  if (errorValue instanceof Error) {
-                    return errorValue.toString();
-                  }
-                  return String(errorValue ?? "Unknown error");
-                })()}
+                {this.state.error?.toString()}
               </code>
             </div>
             <button
@@ -562,6 +663,57 @@ const formatPrice = (price: number) => {
   return `₹${price.toLocaleString()}`;
 };
 
+const projectCardVariants: any = {
+  hidden: {
+    opacity: 0,
+    scale: 0.92,
+    y: 20,
+  },
+  visible: (index: number) => ({
+    opacity: 1,
+    scale: 1,
+    y: 0,
+    transition: {
+      delay: Math.min(index * 0.05, 0.4),
+      duration: 0.35,
+      ease: "easeOut",
+    },
+  }),
+  exit: {
+    opacity: 0,
+    scale: 0.9,
+    y: -10,
+    transition: {
+      duration: 0.15,
+      ease: "easeIn",
+    },
+  },
+};
+
+const projectRowVariants: any = {
+  hidden: {
+    opacity: 0,
+    x: -12,
+  },
+  visible: (index: number) => ({
+    opacity: 1,
+    x: 0,
+    transition: {
+      delay: Math.min(index * 0.04, 0.35),
+      duration: 0.3,
+      ease: "easeOut",
+    },
+  }),
+  exit: {
+    opacity: 0,
+    x: 12,
+    transition: {
+      duration: 0.15,
+      ease: "easeIn",
+    },
+  },
+};
+
 const ProjectCard = ({
   project,
   onClick,
@@ -572,7 +724,51 @@ const ProjectCard = ({
   isSelected,
   onSelect,
   onShowOnMap,
-}: any) => (
+  isAlertActive,
+  alertActiveSince,
+  onToggleAlert,
+}: any) => {
+  const [isClickPulsing, setIsClickPulsing] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+
+  const activeSinceDate = useMemo(() => {
+    if (!isAlertActive) return null;
+    let rawDate = alertActiveSince;
+    if (!rawDate) {
+      try {
+        const saved = localStorage.getItem("pysync_price_alerts");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed[project.id]?.createdAt) {
+            rawDate = parsed[project.id].createdAt;
+          }
+        }
+      } catch (_) {}
+    }
+    if (!rawDate) {
+      rawDate = new Date().toISOString();
+    }
+    try {
+      const d = new Date(rawDate);
+      if (isNaN(d.getTime())) return null;
+      return d.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    } catch {
+      return null;
+    }
+  }, [isAlertActive, alertActiveSince, project.id]);
+
+  const handleClickAlert = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsClickPulsing(true);
+    setTimeout(() => setIsClickPulsing(false), 600);
+    onToggleAlert && onToggleAlert(project);
+  };
+
+  return (
   <motion.div
     whileHover={{ y: -8, scale: 1.02, transition: { duration: 0.3 } }}
     onClick={() => onClick(project)}
@@ -597,37 +793,126 @@ const ProjectCard = ({
       {isSelected && <Check size={12} className="text-bg font-black" />}
     </div>
 
+    {/* Price Alert Bell Button & Descriptive Hover Popover */}
+    <div
+      className="absolute top-3 right-3 z-30"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      <button
+        type="button"
+        id={`btn-price-alert-${project.id}`}
+        onClick={handleClickAlert}
+        className={`relative w-7 h-7 rounded-lg border flex items-center justify-center transition-all duration-300 shadow-md backdrop-blur-md cursor-pointer group/alertbtn transform hover:scale-110 active:scale-90 ${
+          isClickPulsing ? "ring-4 ring-amber-primary scale-125 shadow-[0_0_25px_rgba(245,158,11,1)]" : ""
+        } ${
+          isAlertActive
+            ? "bg-amber-primary text-bg border-amber-primary shadow-[0_0_15px_rgba(245,158,11,0.6)] ring-2 ring-amber-primary/30 hover:shadow-[0_0_22px_rgba(245,158,11,0.9)] hover:ring-amber-primary/60 hover:animate-pulse"
+            : "bg-black/60 border-white/20 text-white/80 hover:text-amber-primary hover:border-amber-primary hover:bg-amber-primary/20 hover:shadow-[0_0_16px_rgba(245,158,11,0.6)] hover:ring-2 hover:ring-amber-primary/40 hover:animate-pulse"
+        }`}
+      >
+        {/* Transient Ripple / Ring Wave Effect on Click */}
+        {isClickPulsing && (
+          <span className="absolute -inset-2 rounded-xl border-2 border-amber-primary animate-ping pointer-events-none opacity-80" />
+        )}
+
+        <Bell
+          size={13}
+          className={`${
+            isAlertActive
+              ? "fill-bg animate-pulse"
+              : "group-hover/alertbtn:scale-110 group-hover/alertbtn:rotate-12 transition-transform duration-200"
+          }`}
+        />
+      </button>
+
+      {/* Custom Descriptive Popover on Hover */}
+      <AnimatePresence>
+        {isHovered && (
+          <motion.div
+            initial={{ opacity: 0, y: -4, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.95 }}
+            transition={{ duration: 0.15 }}
+            className="absolute top-9 right-0 w-64 bg-[#0c0e14]/95 backdrop-blur-md border border-border-bright/90 rounded-xl p-3 shadow-2xl z-50 text-left pointer-events-none"
+          >
+            {/* Header Tag */}
+            <div className="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-border-dim/60">
+              <div className="flex items-center gap-1.5 text-amber-primary font-bold text-[10px] uppercase tracking-wider">
+                <Bell size={11} className={isAlertActive ? "fill-amber-primary" : ""} />
+                <span>Price & Status Monitor</span>
+              </div>
+              <span
+                className={`text-[9px] font-mono font-black uppercase px-1.5 py-0.5 rounded ${
+                  isAlertActive
+                    ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                    : "bg-surface-3 text-text-dim border border-border-dim"
+                }`}
+              >
+                {isAlertActive ? "Subscribed" : "Idle"}
+              </span>
+            </div>
+
+            {/* Metrics List */}
+            <div className="space-y-1.5 text-[11px] font-mono">
+              <div className="flex items-center justify-between">
+                <span className="text-text-dim text-[10px]">Last Tracked Price</span>
+                <span className="font-bold text-amber-primary">{formatPrice(project.price)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-text-dim text-[10px]">Last Tracked Status</span>
+                <span className="font-bold text-text-primary px-1.5 py-0.5 rounded bg-surface-2 border border-border-dim text-[10px]">
+                  {project.status || "Active"}
+                </span>
+              </div>
+              {isAlertActive && (
+                <div className="flex items-center justify-between pt-1 border-t border-border-dim/40">
+                  <span className="text-text-dim text-[10px]">Alert active since</span>
+                  <span className="font-bold text-emerald-400 text-[10px] flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse" />
+                    {activeSinceDate || "Active"}
+                  </span>
+                </div>
+              )}
+              {project.configuration && (
+                <div className="flex items-center justify-between pt-0.5">
+                  <span className="text-text-dim text-[10px]">Configuration</span>
+                  <span className="text-text-secondary text-[10px]">{project.configuration}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Footer Hint */}
+            <div className="mt-2.5 pt-2 border-t border-border-dim/40 text-[9px] text-text-dim flex items-center justify-between">
+              <span>{isAlertActive ? "Click to disable alert" : "Click to subscribe"}</span>
+              <span className="text-amber-primary/70">Instant haptics</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+
     {/* Image Section */}
     <div className="relative h-36 overflow-hidden">
-      <div className="absolute inset-0 z-10 bg-gradient-to-t from-bg via-transparent to-transparent opacity-60" />
-      <div className="absolute inset-0 z-10 bg-gradient-to-b from-black/40 via-transparent to-transparent" />
-
-      <img
-        src={
-          project.images && project.images.length > 0
-            ? project.images[0].data
-            : `https://picsum.photos/seed/${project.title}/800/600`
-        }
-        alt={project.title}
-        referrerPolicy="no-referrer"
-        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000 ease-out"
-      />
+      <InlineImageCarousel images={project.images} title={project.title} heightClass="h-full w-full" />
 
       {/* Status Badge */}
       <div className="absolute bottom-2 left-2 z-20">
         <span
-          className={`px-2 py-0.5 rounded-full text-[7px] font-black uppercase tracking-widest border flex items-center gap-1 ${
+          className={`px-2 py-0.5 rounded-full text-[7px] font-black uppercase tracking-widest border flex items-center gap-1.5 transition-all ${
             project.status === "Active"
               ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-400"
               : project.status === "PENDING_DELETE"
-                ? "border-red-500/50 bg-red-500/10 text-red-400"
-                : "border-amber-500/50 bg-amber-500/10 text-amber-400"
+                ? "border-red-500/60 bg-red-500/15 text-red-400 shadow-sm animate-breathe"
+                : "border-amber-500/60 bg-amber-500/20 text-amber-300 shadow-sm animate-breathe"
           }`}
         >
-          {project.status === "Active" && (
+          {project.status === "Active" ? (
             <span className="flex h-1 w-1 rounded-full bg-emerald-500 animate-pulse" />
+          ) : (
+            <span className="flex h-1.5 w-1.5 rounded-full bg-amber-400 animate-breathe-dot" />
           )}
-          {project.status}
+          {project.status === "PENDING_DELETE" ? "Pending Delete" : project.status}
         </span>
       </div>
 
@@ -725,21 +1010,28 @@ const ProjectCard = ({
         </div>
 
         <div className="flex items-center gap-0.5">
-          {project.coordinates && onShowOnMap && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onShowOnMap(project);
-              }}
-              className="p-1 text-text-dim hover:text-amber-primary hover:bg-amber-primary/10 rounded-lg transition-all group/btn"
-              title="Show on Map"
-            >
-              <MapPin
-                size={12}
-                className="group-hover/btn:scale-110 transition-transform text-amber-primary"
-              />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleAlert && onToggleAlert(project);
+            }}
+            className={`p-1 rounded-lg transition-all duration-300 group/btn transform hover:scale-110 active:scale-95 ${
+              isAlertActive
+                ? "text-amber-primary bg-amber-primary/15 hover:bg-amber-primary/25 border border-amber-primary/30 hover:shadow-[0_0_12px_rgba(245,158,11,0.5)] hover:animate-pulse"
+                : "text-text-dim hover:text-amber-primary hover:bg-amber-primary/15 hover:shadow-[0_0_10px_rgba(245,158,11,0.4)] hover:animate-pulse"
+            }`}
+            title={
+              isAlertActive
+                ? "Price & Status Alert Active (Click to disable)"
+                : "Set Price & Status Alert for this project"
+            }
+          >
+            <Bell
+              size={12}
+              className={`group-hover/btn:scale-110 transition-transform ${isAlertActive ? "fill-amber-primary animate-pulse" : ""}`}
+            />
+          </button>
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -787,7 +1079,8 @@ const ProjectCard = ({
       </div>
     </div>
   </motion.div>
-);
+  );
+};
 
 const BuilderDetailModal = ({
   builderName,
@@ -802,254 +1095,333 @@ const BuilderDetailModal = ({
   onProjectClick?: (project: Project) => void;
   user: User | null;
 }) => {
-  const builderProjects = projects.filter((p) => p.builderName === builderName);
-  const totalArea = builderProjects.reduce(
-    (acc, p) => acc + (parseInt(p.area.replace(/,/g, "")) || 0),
-    0,
+  return (
+    <DeveloperPortfolioModal
+      builderName={builderName}
+      projects={projects}
+      onClose={onClose}
+      onProjectClick={onProjectClick}
+      user={user}
+    />
   );
-  const avgPrice =
-    builderProjects.reduce((acc, p) => acc + p.price, 0) /
-    builderProjects.length;
+};
+
+interface PreviewImage {
+  name?: string;
+  data: string;
+  size?: number;
+}
+
+const ImagePreviewModal = ({
+  images,
+  initialIndex,
+  onClose,
+  showToast,
+}: {
+  images: PreviewImage[];
+  initialIndex: number;
+  onClose: () => void;
+  showToast?: (msg: string, type: "success" | "error" | "info" | "warning") => void;
+}) => {
+  const [currentIndex, setCurrentIndex] = useState(initialIndex);
+  const [scale, setScale] = useState(1);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [viewMode, setViewMode] = useState<"fit" | "full">("fit");
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const dragBounds = viewMode === "full" ? 2500 : scale * 150;
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      } else if (e.key === "ArrowLeft") {
+        handlePrev();
+      } else if (e.key === "ArrowRight") {
+        handleNext();
+      } else if (e.key === "=" || e.key === "+") {
+        handleZoomIn();
+      } else if (e.key === "-") {
+        handleZoomOut();
+      } else if (e.key === "r" || e.key === "R") {
+        handleReset();
+      } else if (e.key === "f" || e.key === "F") {
+        setViewMode((prev) => {
+          const next = prev === "fit" ? "full" : "fit";
+          setScale(1);
+          setPosition({ x: 0, y: 0 });
+          if (showToast) {
+            showToast(
+              next === "full" ? "Switched to Full Size mode" : "Switched to Fit to Screen mode",
+              "info"
+            );
+          }
+          return next;
+        });
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [currentIndex, scale, position, images, showToast]);
+
+  const handlePrev = () => {
+    if (images.length <= 1) return;
+    setCurrentIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1));
+    handleReset();
+  };
+
+  const handleNext = () => {
+    if (images.length <= 1) return;
+    setCurrentIndex((prev) => (prev === images.length - 1 ? 0 : prev + 1));
+    handleReset();
+  };
+
+  const handleZoomIn = () => {
+    setScale((prev) => Math.min(prev + 0.5, 5));
+  };
+
+  const handleZoomOut = () => {
+    setScale((prev) => {
+      const nextScale = Math.max(prev - 0.5, 1);
+      if (nextScale === 1) {
+        setPosition({ x: 0, y: 0 });
+      }
+      return nextScale;
+    });
+  };
+
+  const handleReset = () => {
+    setScale(1);
+    setPosition({ x: 0, y: 0 });
+    setViewMode("fit");
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (scale <= 1 && viewMode !== "full") return;
+    e.preventDefault();
+    setIsDragging(true);
+    dragStartRef.current = { x: e.clientX - position.x, y: e.clientY - position.y };
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging || (scale <= 1 && viewMode !== "full")) return;
+    e.preventDefault();
+    const newX = e.clientX - dragStartRef.current.x;
+    const newY = e.clientY - dragStartRef.current.y;
+    setPosition({
+      x: Math.min(Math.max(newX, -dragBounds), dragBounds),
+      y: Math.min(Math.max(newY, -dragBounds), dragBounds),
+    });
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (scale <= 1 && viewMode !== "full") return;
+    const touch = e.touches[0];
+    setIsDragging(true);
+    dragStartRef.current = { x: touch.clientX - position.x, y: touch.clientY - position.y };
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isDragging || (scale <= 1 && viewMode !== "full")) return;
+    const touch = e.touches[0];
+    const newX = touch.clientX - dragStartRef.current.x;
+    const newY = touch.clientY - dragStartRef.current.y;
+    setPosition({
+      x: Math.min(Math.max(newX, -dragBounds), dragBounds),
+      y: Math.min(Math.max(newY, -dragBounds), dragBounds),
+    });
+  };
+
+  const currentImage = images[currentIndex];
+  if (!currentImage) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-2 sm:p-4 md:p-6">
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={onClose}
-        className="absolute inset-0 bg-black/80 "
-      />
-      <motion.div
-        initial={{ opacity: 0, scale: 0.9, y: 30 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.9, y: 30 }}
-        className="relative w-full max-w-6xl h-full max-h-[95vh] sm:max-h-[90vh] bg-surface border border-border-dim rounded-2xl sm:rounded-[32px] shadow-[0_32px_128px_-16px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col z-[70]"
-      >
-        <button
-          onClick={onClose}
-          className="absolute top-6 right-6 z-30 p-3 bg-surface/40 hover:bg-amber-primary text-white hover:text-bg rounded-full border border-white/10 transition-all group"
-        >
-          <X size={18} className="group-hover:rotate-90 transition-transform" />
-        </button>
-
-        <div className="flex-1 overflow-y-auto no-scrollbar">
-          <div className="w-full max-w-none">
-            {/* Hero Header */}
-            <div className="relative p-8 sm:p-12 bg-gradient-to-br from-amber-primary/10 via-surface to-surface border-b border-border-dim overflow-hidden">
-              <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-amber-primary/5 rounded-full -mr-48 -mt-48 blur-[40px]" />
-
-              <div className="relative z-10 flex flex-col md:flex-row items-center md:items-start gap-8">
-                <motion.div
-                  initial={{ rotate: -10, scale: 0.8 }}
-                  animate={{ rotate: 0, scale: 1 }}
-                  className="w-20 h-20 bg-surface-2 rounded-2xl flex items-center justify-center text-amber-primary border border-border-bright shadow-xl shadow-amber-primary/10"
-                >
-                  <Building2 size={36} strokeWidth={1.5} />
-                </motion.div>
-                <div className="text-center md:text-left space-y-4 max-w-2xl">
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-center md:justify-start gap-3">
-                      <span className="text-[9px] font-black uppercase tracking-[0.3em] text-amber-primary">
-                        Developer Profile
-                      </span>
-                      <div className="h-px w-8 bg-amber-primary/30" />
-                    </div>
-                    <h2 className="text-3xl sm:text-4xl font-serif font-bold text-text-primary tracking-tight leading-tight">
-                      {builderName}
-                    </h2>
-                  </div>
-
-                  <p className="text-text-dim text-[11px] leading-relaxed font-medium whitespace-pre-line opacity-80">
-                    {builderName === "M3M"
-                      ? "Founded in 2010, M3M India has quickly risen as one of India’s most dynamic and innovative real estate developers, built on the values of ethical governance, transparency, commitment, and passion for excellence.\n\nWith a forward-looking vision crafted by Founder Chairman Sh. Basant Bansal and Promoters Sh. Roop Bansal and Sh. Pankaj Bansal, M3M India has become a transformative force in the luxury residential and retail real estate sector. Today, M3M stands as a symbol of sophistication and innovation, setting new benchmarks across India."
-                      : builderName === "DLF"
-                        ? "Founded in 1946 by Chaudhary Raghvendra Singh, DLF began with the development of 22 urban colonies in Delhi. In 1985, the company expanded into the then-unknown region of Gurugram, creating exceptional living and working spaces for India’s emerging global professionals. Today, DLF is the largest publicly listed real estate company in India, with residential, commercial, and retail properties spanning 15 states and 24 cities.\n\nOur diverse verticals reflect our dedication to developing ecosystems for India’s evolving needs. However, our true foundation lies in our employees, customers, stakeholders, and shareholders. We invest in spearheading innovation through empowerment and optimism, to build the foundation of India’s future grounded in the legacy of our past."
-                        : "A premier real estate developer committed to delivering high-quality residential and commercial spaces with a focus on innovation and sustainability."}
-                  </p>
-
-                  <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 pt-2">
-                    <div className="flex items-center gap-2 px-3 py-1.5 bg-green-500/10 text-green-500 rounded-full border border-green-500/20 text-[9px] font-black uppercase tracking-widest">
-                      <ShieldCheck size={12} />
-                      Verified
-                    </div>
-                    <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-primary/10 text-amber-primary rounded-full border border-amber-primary/20 text-[9px] font-black uppercase tracking-widest">
-                      <Award size={12} />
-                      Premium
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-8 sm:p-12 space-y-12">
-              {/* Key Performance Indicators */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                {[
-                  {
-                    label: "Total Projects",
-                    value: builderProjects.length,
-                    icon: LayoutGrid,
-                    color: "text-amber-primary",
-                    bg: "bg-amber-primary/5",
-                  },
-                  {
-                    label: "Area Delivered",
-                    value: `${(totalArea / 1000000).toFixed(1)}M Sq.Ft.`,
-                    icon: Activity,
-                    color: "text-blue-400",
-                    bg: "bg-blue-400/5",
-                  },
-                  {
-                    label: "Avg. Value",
-                    value: formatPrice(avgPrice),
-                    icon: IndianRupee,
-                    color: "text-green-400",
-                    bg: "bg-green-400/5",
-                  },
-                ].map((stat, i) => (
-                  <motion.div
-                    key={i}
-                    whileHover={{ y: -3 }}
-                    className={`${stat.bg} p-6 rounded-2xl border border-border-bright space-y-3 relative overflow-hidden group`}
-                  >
-                    <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
-                      <stat.icon size={48} />
-                    </div>
-                    <div className="flex items-center gap-2 text-[9px] text-text-dim uppercase tracking-[0.25em] font-black">
-                      <stat.icon size={14} className={stat.color} />
-                      {stat.label}
-                    </div>
-                    <div className="text-xl font-serif font-bold text-text-primary">
-                      {stat.value}
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-
-              {/* Portfolio Showcase */}
-              <div className="space-y-8">
-                <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-                  <div className="space-y-1">
-                    <h3 className="text-2xl font-serif font-bold text-text-primary">
-                      Project Portfolio
-                    </h3>
-                    <p className="text-xs text-text-dim">
-                      Selection of active developments
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3 px-3 py-1.5 bg-surface-2 rounded-lg border border-border-bright">
-                    <span className="text-[9px] text-text-dim uppercase tracking-widest font-bold">
-                      Listings
-                    </span>
-                    <div className="w-px h-3 bg-border-dim" />
-                    <span className="text-[10px] font-mono font-bold text-amber-primary">
-                      {builderProjects.length}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {builderProjects.map((p, idx) => (
-                    <motion.button
-                      key={p.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: idx * 0.05 }}
-                      onClick={() => onProjectClick && onProjectClick(p)}
-                      className="group text-left bg-surface-2 border border-border-bright rounded-2xl overflow-hidden hover:border-amber-primary/40 transition-all shadow-md"
-                    >
-                      <div className="aspect-[16/10] relative overflow-hidden">
-                        <img
-                          src={
-                            p.images && p.images.length > 0
-                              ? p.images[0].data
-                              : `https://picsum.photos/seed/${p.id}/800/500`
-                          }
-                          alt={p.title}
-                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-surface-2 via-transparent to-transparent" />
-                        <div className="absolute top-3 right-3">
-                          <span
-                            className={`text-[7px] px-2 py-0.5 rounded-full border font-black uppercase tracking-widest ${
-                              p.status === "Active"
-                                ? "border-emerald-500/30 bg-emerald-500/20 text-emerald-400"
-                                : "border-amber-500/30 bg-amber-500/20 text-amber-400"
-                            }`}
-                          >
-                            {p.status}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="p-5 space-y-3">
-                        <div className="space-y-0.5">
-                          <h4 className="text-sm font-bold text-text-primary group-hover:text-amber-primary transition-colors line-clamp-1">
-                            {p.title}
-                          </h4>
-                          <div className="flex items-center gap-1.5 text-[9px] text-text-dim font-medium">
-                            <MapPin size={10} className="text-amber-primary" />
-                            {p.location}
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-between pt-3 border-t border-border-dim/30">
-                          <div className="space-y-0.5">
-                            <p className="text-[7px] text-text-dim uppercase font-black tracking-widest">
-                              From
-                            </p>
-                            <div className="text-xs font-mono font-bold text-text-primary">
-                              {formatPrice(p.price)}
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-[7px] text-text-dim uppercase font-black tracking-widest">
-                              Type
-                            </p>
-                            <div className="text-[9px] text-text-secondary font-bold uppercase tracking-wider">
-                              {p.type}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </motion.button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
+    <div className="fixed inset-0 z-[110] flex flex-col items-center justify-center bg-black/98 backdrop-blur-2xl text-white select-none font-sans">
+      <div className="absolute top-0 left-0 right-0 h-16 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between px-6 z-50">
+        <div className="flex flex-col">
+          <span className="text-xs font-bold text-amber-primary uppercase tracking-widest">
+            {currentImage.name || "Asset Image"}
+          </span>
+          {images.length > 1 && (
+            <span className="text-[10px] text-text-dim font-mono">
+              Asset {currentIndex + 1} of {images.length}
+            </span>
+          )}
         </div>
 
-        <div className="p-6 sm:p-8 border-t border-border-dim bg-surface-2">
-          <div className="w-full max-w-none flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-6 text-text-dim">
-              <div className="flex flex-col">
-                <span className="text-[8px] uppercase font-black tracking-widest">
-                  Updated
-                </span>
-                <span className="text-[10px] font-mono">
-                  {new Date().toLocaleDateString()}
-                </span>
-              </div>
-              <div className="w-px h-6 bg-border-dim" />
-              <div className="flex flex-col">
-                <span className="text-[8px] uppercase font-black tracking-widest">
-                  ID
-                </span>
-                <span className="text-[10px] font-mono">
-                  B-{builderName.slice(0, 3).toUpperCase()}
-                </span>
-              </div>
-            </div>
+        <div className="flex items-center gap-2">
+          {/* Fit to Screen vs Full Size Segmented Toggle */}
+          <div className="flex items-center bg-white/5 p-0.5 rounded-lg border border-white/10 mr-1 shrink-0">
             <button
-              onClick={onClose}
-              className="w-full sm:w-auto px-10 py-3.5 bg-amber-primary text-bg rounded-xl text-[10px] font-black uppercase tracking-[0.2em] hover:bg-amber-secondary transition-all shadow-xl shadow-amber-primary/20 active:scale-95"
+              onClick={() => {
+                setViewMode("fit");
+                setScale(1);
+                setPosition({ x: 0, y: 0 });
+                if (showToast) showToast("Switched to Fit to Screen", "info");
+              }}
+              className={`flex items-center gap-1 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider rounded-md transition-all cursor-pointer ${
+                viewMode === "fit"
+                  ? "bg-amber-primary text-bg font-extrabold shadow-sm"
+                  : "text-text-dim hover:text-white"
+              }`}
+              title="Fit to Screen (Key: F)"
             >
-              Close Portfolio
+              <Minimize2 size={11} />
+              <span className="hidden sm:inline">Fit</span>
+            </button>
+            <button
+              onClick={() => {
+                setViewMode("full");
+                setScale(1);
+                setPosition({ x: 0, y: 0 });
+                if (showToast) showToast("Switched to Full Size", "info");
+              }}
+              className={`flex items-center gap-1 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider rounded-md transition-all cursor-pointer ${
+                viewMode === "full"
+                  ? "bg-amber-primary text-bg font-extrabold shadow-sm"
+                  : "text-text-dim hover:text-white"
+              }`}
+              title="Full Size (Key: F)"
+            >
+              <Maximize2 size={11} />
+              <span className="hidden sm:inline">Full</span>
             </button>
           </div>
+
+          <div className="px-2.5 py-1 text-[10px] font-mono bg-white/10 rounded-md border border-white/5 text-amber-primary font-bold">
+            {Math.round(scale * 100)}%
+          </div>
+
+          <button
+            onClick={handleZoomIn}
+            disabled={scale >= 5}
+            className="p-2 bg-white/5 hover:bg-amber-primary hover:text-black rounded-lg border border-white/10 transition-colors cursor-pointer disabled:opacity-50"
+            title="Zoom In (Key: +)"
+          >
+            <ZoomIn size={14} />
+          </button>
+          <button
+            onClick={handleZoomOut}
+            disabled={scale <= 1}
+            className="p-2 bg-white/5 hover:bg-amber-primary hover:text-black rounded-lg border border-white/10 transition-colors cursor-pointer disabled:opacity-50"
+            title="Zoom Out (Key: -)"
+          >
+            <ZoomOut size={14} />
+          </button>
+          <button
+            onClick={handleReset}
+            disabled={scale === 1 && position.x === 0 && position.y === 0 && viewMode === "fit"}
+            className="p-2 bg-white/5 hover:bg-amber-primary hover:text-black rounded-lg border border-white/10 transition-colors cursor-pointer disabled:opacity-50"
+            title="Reset (Key: R)"
+          >
+            <RotateCcw size={14} />
+          </button>
+          <button
+            onClick={onClose}
+            className="p-2 bg-amber-primary hover:bg-amber-secondary text-black rounded-lg transition-colors cursor-pointer"
+            title="Close (Key: Esc)"
+          >
+            <X size={14} />
+          </button>
         </div>
-      </motion.div>
+      </div>
+
+      <div
+        ref={containerRef}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleMouseUp}
+        className={`relative flex-1 w-full h-full flex items-center justify-center overflow-hidden p-4 ${
+          scale > 1 || viewMode === "full" ? "cursor-grab active:cursor-grabbing" : ""
+        }`}
+      >
+        <motion.div
+          animate={{
+            scale,
+            x: position.x,
+            y: position.y,
+          }}
+          transition={isDragging ? { duration: 0 } : { type: "spring", damping: 30, stiffness: 250 }}
+          onMouseDown={handleMouseDown}
+          onTouchStart={handleTouchStart}
+          className="relative max-w-full max-h-full flex items-center justify-center"
+        >
+          <img
+            src={currentImage.data}
+            alt={currentImage.name || "Preview Image"}
+            draggable={false}
+            referrerPolicy="no-referrer"
+            className={
+              viewMode === "full"
+                ? "max-w-none max-h-none object-contain rounded-lg shadow-2xl border border-white/5"
+                : "max-w-[90vw] max-h-[80vh] md:max-w-[85vw] md:max-h-[85vh] object-contain rounded-lg shadow-2xl border border-white/5"
+            }
+          />
+        </motion.div>
+
+        {images.length > 1 && (
+          <>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handlePrev();
+              }}
+              className="absolute left-6 top-1/2 -translate-y-1/2 p-3 bg-black/60 hover:bg-amber-500 hover:text-black text-white rounded-full border border-white/10 backdrop-blur-md transition-all flex items-center justify-center shadow-lg group hover:scale-105"
+            >
+              <ChevronLeft size={20} className="group-hover:-translate-x-0.5 transition-transform" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleNext();
+              }}
+              className="absolute right-6 top-1/2 -translate-y-1/2 p-3 bg-black/60 hover:bg-amber-500 hover:text-black text-white rounded-full border border-white/10 backdrop-blur-md transition-all flex items-center justify-center shadow-lg group hover:scale-105"
+            >
+              <ChevronRight size={20} className="group-hover:translate-x-0.5 transition-transform" />
+            </button>
+          </>
+        )}
+      </div>
+
+      {(scale > 1 || viewMode === "full") && (
+        <>
+          {/* Viewport Navigator Box */}
+          <div className="absolute bottom-6 right-6 z-40 flex flex-col p-1.5 bg-black/85 border border-white/15 rounded-xl backdrop-blur-lg shadow-2xl w-32 h-24 overflow-hidden select-none">
+            <div className="relative w-full h-full flex items-center justify-center bg-zinc-950/40 rounded-lg overflow-hidden">
+              <img
+                src={currentImage.data}
+                alt="Navigator Thumbnail"
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-contain opacity-50 select-none pointer-events-none"
+              />
+              <div
+                style={{
+                  width: `${100 / scale}%`,
+                  height: `${100 / scale}%`,
+                  left: `${50 - (50 / scale) - (position.x / dragBounds) * (50 - (50 / scale))}%`,
+                  top: `${50 - (50 / scale) - (position.y / dragBounds) * (50 - (50 / scale))}%`,
+                }}
+                className="absolute border border-amber-primary bg-amber-primary/10 rounded-sm pointer-events-none transition-all duration-75"
+              />
+            </div>
+            <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-black/95 rounded border border-white/10 text-[8px] font-black text-amber-primary uppercase tracking-widest pointer-events-none">
+              NAVIGATOR
+            </div>
+          </div>
+
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 px-4 py-2 bg-black/70 rounded-full border border-white/10 backdrop-blur-md text-[10px] text-text-dim pointer-events-none flex items-center gap-1.5 font-sans">
+            <span>Drag image to pan and explore details</span>
+          </div>
+        </>
+      )}
     </div>
   );
 };
@@ -1066,6 +1438,8 @@ const ProjectDetailModal = ({
   hasDeletePermission,
   hasCreatePermission,
   onRequestEdit,
+  isAlertActive,
+  onToggleAlert,
 }: {
   project: Project;
   onClose: () => void;
@@ -1081,13 +1455,46 @@ const ProjectDetailModal = ({
   hasDeletePermission?: boolean;
   hasCreatePermission?: boolean;
   onRequestEdit?: (p: Project, details: string) => Promise<boolean>;
+  isAlertActive?: boolean;
+  onToggleAlert?: (p: Project) => void;
 }) => {
   const [isReportMistakeOpen, setIsReportMistakeOpen] = useState(false);
   const [mistakeDescription, setMistakeDescription] = useState("");
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
   const [currentImgIndex, setCurrentImgIndex] = useState(0);
   const [currentModalTab, setCurrentModalTab] = useState<"overview" | "specs" | "payment" | "inventory">("overview");
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [previewInitialIndex, setPreviewInitialIndex] = useState(0);
+  const [isMobileSummaryExpanded, setIsMobileSummaryExpanded] = useState(false);
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+  const [qrCodeUrl, setQrCodeUrl] = useState<string>("");
+  const [copiedLink, setCopiedLink] = useState(false);
   const modalContentRef = useRef<HTMLDivElement>(null);
+
+  const projectShareUrl = typeof window !== "undefined"
+    ? `${window.location.origin}${window.location.pathname}?project=${project.id}`
+    : `https://example.com?project=${project.id}`;
+
+  useEffect(() => {
+    if (project?.id) {
+      QRCode.toDataURL(
+        projectShareUrl,
+        {
+          width: 360,
+          margin: 2,
+          color: {
+            dark: "#f59e0b",
+            light: "#0b0c0e",
+          },
+        },
+        (err, url) => {
+          if (!err && url) {
+            setQrCodeUrl(url);
+          }
+        }
+      );
+    }
+  }, [project?.id, projectShareUrl]);
 
   // Unit Inventory state & generation helpers
   interface Unit {
@@ -1104,6 +1511,7 @@ const ProjectDetailModal = ({
   const [activeUnitIdForStatusEdit, setActiveUnitIdForStatusEdit] = useState<string | null>(null);
   const [inventorySearch, setInventorySearch] = useState("");
   const [inventoryStatusFilter, setInventoryStatusFilter] = useState<"All" | "Available" | "Sold" | "Reserved">("All");
+  const [updatedUnits, setUpdatedUnits] = useState<Record<string, number>>({});
 
   useEffect(() => {
     if (project && project.id) {
@@ -1151,12 +1559,16 @@ const ProjectDetailModal = ({
       }
       setUnits(unitsList);
     }
-  }, [project]);
+  }, [project?.id]);
 
   const handleUpdateUnitStatus = (unitId: string, newStatus: "Available" | "Sold" | "Reserved") => {
     setUnits((prev) =>
       prev.map((u) => (u.id === unitId ? { ...u, status: newStatus } : u))
     );
+    setUpdatedUnits((prev) => ({
+      ...prev,
+      [unitId]: Date.now()
+    }));
     const displayId = unitId.includes("-") ? unitId.split("-")[1] : unitId;
     const displayTower = unitId.includes("-") ? unitId.split("-")[0] : "";
     showToast(`${displayTower} Unit #${displayId} updated to ${newStatus}`, "success");
@@ -1248,22 +1660,59 @@ const ProjectDetailModal = ({
         <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-transparent via-amber-500 to-transparent opacity-80 z-40" />
 
         {/* Floating Elegant Actions Bar */}
-        <div className="absolute top-6 right-6 z-40 flex items-center gap-3">
+        <div className="absolute top-3 right-3 sm:top-6 sm:right-6 z-50 flex items-center gap-2 sm:gap-3">
           <button
-            onClick={() => setIsReportMistakeOpen(!isReportMistakeOpen)}
-            className={`px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-2 transition-all duration-300 shadow-md border ${
+            type="button"
+            onClick={() => onToggleAlert && onToggleAlert(project)}
+            className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-[0.15em] sm:tracking-[0.2em] flex items-center gap-1.5 sm:gap-2 transition-all duration-300 shadow-md border cursor-pointer ${
+              isAlertActive
+                ? "bg-amber-500 border-amber-500 text-black font-extrabold shadow-[0_0_20px_rgba(245,158,11,0.4)]"
+                : "bg-white/5 border-white/10 text-white/80 hover:text-white hover:bg-white/10 hover:border-white/20"
+            }`}
+            title={
+              isAlertActive
+                ? "Price & Status Alert is Active (Click to disable)"
+                : "Set Price & Status Alert for this project"
+            }
+          >
+            <Bell size={11} className={isAlertActive ? "fill-black animate-pulse" : ""} />
+            <span>{isAlertActive ? "Alert Active" : "Price Alert"}</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setIsQrModalOpen(!isQrModalOpen);
+              if (isReportMistakeOpen) setIsReportMistakeOpen(false);
+            }}
+            className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-[0.15em] sm:tracking-[0.2em] flex items-center gap-1.5 sm:gap-2 transition-all duration-300 shadow-md border ${
+              isQrModalOpen
+                ? "bg-amber-500 border-amber-500 text-black font-extrabold"
+                : "bg-white/5 border-white/10 text-white/80 hover:text-white hover:bg-white/10 hover:border-white/20"
+            }`}
+            title="Generate QR Code"
+          >
+            <QrCode size={11} className={isQrModalOpen ? "animate-pulse" : ""} />
+            <span>{isQrModalOpen ? "Hide QR" : "QR Code"}</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setIsReportMistakeOpen(!isReportMistakeOpen);
+              if (isQrModalOpen) setIsQrModalOpen(false);
+            }}
+            className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-[0.15em] sm:tracking-[0.2em] flex items-center gap-1.5 sm:gap-2 transition-all duration-300 shadow-md border ${
               isReportMistakeOpen
                 ? "bg-amber-500 border-amber-500 text-black font-extrabold"
                 : "bg-white/5 border-white/10 text-white/80 hover:text-white hover:bg-white/10 hover:border-white/20"
             }`}
           >
             <AlertCircle size={11} className={isReportMistakeOpen ? "animate-pulse" : ""} />
-            <span>{isReportMistakeOpen ? "Cancel Report" : "Report Flag"}</span>
+            <span>{isReportMistakeOpen ? "Cancel" : "Report"}</span>
           </button>
           
           <button
             onClick={onClose}
-            className="p-2.5 bg-white/5 hover:bg-amber-500 text-white hover:text-black rounded-full border border-white/10 hover:border-amber-500/25 transition-all duration-300 group shadow-md flex items-center justify-center"
+            className="p-2 sm:p-2.5 bg-white/5 hover:bg-amber-500 text-white hover:text-black rounded-full border border-white/10 hover:border-amber-500/25 transition-all duration-300 group shadow-md flex items-center justify-center"
             title="Dismiss detailed view"
           >
             <X size={14} className="group-hover:rotate-90 transition-transform duration-300" />
@@ -1272,6 +1721,110 @@ const ProjectDetailModal = ({
 
         <div ref={modalContentRef} className="flex-1 overflow-y-auto no-scrollbar scroll-smooth">
           <div className="w-full">
+            {/* Interactive QR Code Generator Drawer */}
+            <AnimatePresence>
+              {isQrModalOpen && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.35, ease: "easeInOut" }}
+                  className="bg-amber-500/[0.04] border-b border-amber-500/20 overflow-hidden font-sans relative z-30"
+                >
+                  <div className="p-6 md:p-8 max-w-2xl mx-auto flex flex-col sm:flex-row items-center gap-6 text-left">
+                    <motion.div 
+                      initial={{ scale: 0.9, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ duration: 0.3, ease: "easeOut" }}
+                      className="relative group shrink-0 p-3 bg-[#0B0C0E] border-2 border-amber-500/30 rounded-2xl shadow-xl shadow-amber-500/10 overflow-hidden"
+                    >
+                      <AnimatePresence mode="wait">
+                        {qrCodeUrl ? (
+                          <motion.img
+                            key={qrCodeUrl}
+                            initial={{ opacity: 0, scale: 0.82 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.85 }}
+                            transition={{
+                              type: "spring",
+                              stiffness: 260,
+                              damping: 22,
+                              mass: 0.8,
+                            }}
+                            src={qrCodeUrl}
+                            alt={`QR Code for ${project.title}`}
+                            className="w-36 h-36 sm:w-44 sm:h-44 object-contain rounded-lg shadow-md"
+                          />
+                        ) : (
+                          <motion.div
+                            key="loading"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="w-36 h-36 sm:w-44 sm:h-44 flex flex-col items-center justify-center text-amber-500/70 gap-2 font-mono text-[10px]"
+                          >
+                            <Loader2 className="animate-spin text-amber-500" size={24} />
+                            <span>Generating QR...</span>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                      <div className="absolute inset-0 bg-amber-500/5 rounded-2xl pointer-events-none group-hover:bg-transparent transition-colors" />
+                    </motion.div>
+
+                    <div className="flex-1 space-y-3 text-center sm:text-left w-full min-w-0">
+                      <div className="space-y-1">
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-500 text-[9px] font-black uppercase tracking-widest">
+                          <QrCode size={10} /> Scan & Share Property
+                        </div>
+                        <h4 className="text-base font-extrabold text-white truncate">
+                          {project.title}
+                        </h4>
+                        <p className="text-xs text-white/60">
+                          Scan with any mobile camera or QR reader to quickly share or view this property link.
+                        </p>
+                      </div>
+
+                      <div className="p-2.5 rounded-xl bg-black/60 border border-white/10 flex items-center justify-between gap-2 text-xs font-mono text-amber-400/90 truncate">
+                        <span className="truncate text-[11px]">{projectShareUrl}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(projectShareUrl);
+                            setCopiedLink(true);
+                            setTimeout(() => setCopiedLink(false), 2000);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-amber-500 text-black font-sans font-extrabold text-[10px] uppercase tracking-wider shrink-0 hover:bg-amber-400 transition-colors flex items-center gap-1 cursor-pointer"
+                        >
+                          {copiedLink ? <CheckCircle2 size={11} /> : <Copy size={11} />}
+                          <span>{copiedLink ? "Copied" : "Copy"}</span>
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-1 justify-center sm:justify-start">
+                        {qrCodeUrl && (
+                          <a
+                            href={qrCodeUrl}
+                            download={`${project.title.replace(/\s+/g, "_")}_QR.png`}
+                            className="px-3.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white/90 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all"
+                          >
+                            <Download size={11} />
+                            <span>Download PNG</span>
+                          </a>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setIsQrModalOpen(false)}
+                          className="px-3.5 py-1.5 rounded-xl bg-transparent hover:bg-white/5 text-white/50 hover:text-white text-[10px] font-bold uppercase tracking-wider transition-colors"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
             {/* Interactive Discrepancy Reporting Drawer */}
             <AnimatePresence>
               {isReportMistakeOpen && (
@@ -1337,6 +1890,93 @@ const ProjectDetailModal = ({
               )}
             </AnimatePresence>
 
+            {/* Mobile Sticky Summary Header (Collapsible layout prioritizing price & location summary) */}
+            <div className="sticky top-0 z-40 md:hidden bg-[#0B0C0E]/95 backdrop-blur-xl border-b border-amber-500/25 shadow-2xl transition-all duration-300">
+              <div className="py-2.5 pl-3.5 pr-28 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 overflow-hidden flex-1 min-w-0">
+                  <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-500 border border-amber-500/20 shrink-0">
+                    <IndianRupee size={13} />
+                  </div>
+                  <div className="flex flex-col overflow-hidden min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-black text-amber-500 tracking-tight font-mono">
+                        {formatPrice(project.price)}
+                      </span>
+                      <span className={`text-[7.5px] px-1.5 py-0.5 rounded font-black uppercase tracking-wider shrink-0 border flex items-center gap-1 ${
+                        project.status === "Active"
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                          : "border-amber-500/60 bg-amber-500/20 text-amber-300 shadow-sm animate-breathe"
+                      }`}>
+                        {project.status !== "Active" && (
+                          <span className="w-1 h-1 rounded-full bg-amber-400 animate-breathe-dot" />
+                        )}
+                        {project.status}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 text-[9.5px] text-white/80 font-medium truncate">
+                      <MapPin size={9} className="text-amber-500 shrink-0 animate-pulse" />
+                      <span className="truncate">{project.title} · {project.location}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsMobileSummaryExpanded(!isMobileSummaryExpanded)}
+                  className="px-2 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-500 text-[8.5px] font-black uppercase tracking-wider flex items-center gap-1 shrink-0 transition-all cursor-pointer"
+                  title="Expand / collapse quick metrics"
+                >
+                  <span>{isMobileSummaryExpanded ? "Less" : "Specs"}</span>
+                  <ChevronDown
+                    size={11}
+                    className={`transition-transform duration-300 ${
+                      isMobileSummaryExpanded ? "rotate-180" : ""
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Collapsible Quick Metrics Drawer */}
+              <AnimatePresence>
+                {isMobileSummaryExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="overflow-hidden border-t border-white/10 bg-black/80 px-3.5 py-3 space-y-2.5"
+                  >
+                    <div className="grid grid-cols-2 gap-2 text-sans">
+                      <div className="p-2 rounded-xl bg-white/[0.03] border border-white/5 flex flex-col justify-between">
+                        <span className="text-[7px] uppercase font-black text-white/40 tracking-wider">Price Tier</span>
+                        <span className="text-[11px] font-extrabold text-amber-500">{formatPrice(project.price)}</span>
+                      </div>
+                      <div className="p-2 rounded-xl bg-white/[0.03] border border-white/5 flex flex-col justify-between">
+                        <span className="text-[7px] uppercase font-black text-white/40 tracking-wider">Footprint</span>
+                        <span className="text-[11px] font-extrabold text-white">{project.area} Sq.Ft.</span>
+                      </div>
+                      <div className="p-2 rounded-xl bg-white/[0.03] border border-white/5 flex flex-col justify-between">
+                        <span className="text-[7px] uppercase font-black text-white/40 tracking-wider">Configuration</span>
+                        <span className="text-[11px] font-extrabold text-white truncate">{project.configuration || "N/A"}</span>
+                      </div>
+                      <div className="p-2 rounded-xl bg-white/[0.03] border border-white/5 flex flex-col justify-between">
+                        <span className="text-[7px] uppercase font-black text-white/40 tracking-wider">Builder</span>
+                        <span className="text-[11px] font-extrabold text-white truncate">{project.builderName || "General Builder"}</span>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-white/5 flex items-center justify-between text-[8.5px] text-white/60">
+                      <div className="flex items-center gap-1 text-amber-500 truncate pr-2">
+                        <MapPin size={9} className="shrink-0" />
+                        <span className="truncate">{project.location}</span>
+                      </div>
+                      <span className="text-[7.5px] font-mono text-white/40 shrink-0">RERA: {project.reraNumber || "Verified"}</span>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
             {/* Elite Image Gallery Carousel Hero */}
             <div className="relative h-[280px] sm:h-[460px] lg:h-[530px] w-full overflow-hidden font-sans">
               <AnimatePresence mode="wait">
@@ -1349,9 +1989,27 @@ const ProjectDetailModal = ({
                   src={images[currentImgIndex].data}
                   alt={project.title}
                   referrerPolicy="no-referrer"
-                  className="absolute inset-0 w-full h-full object-cover"
+                  className="absolute inset-0 w-full h-full object-cover cursor-zoom-in hover:scale-102 transition-all duration-500"
+                  onClick={() => {
+                    setPreviewInitialIndex(currentImgIndex);
+                    setIsPreviewModalOpen(true);
+                  }}
                 />
               </AnimatePresence>
+
+              {/* Click to Zoom Overlay Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setPreviewInitialIndex(currentImgIndex);
+                  setIsPreviewModalOpen(true);
+                }}
+                className="absolute top-6 left-6 z-30 px-3.5 py-2 rounded-full bg-black/65 hover:bg-amber-500 text-white hover:text-black border border-white/10 backdrop-blur-md text-[10px] font-black uppercase tracking-[0.15em] flex items-center gap-2 transition-all duration-300 shadow-md hover:scale-105 cursor-pointer"
+                title="Zoom-in / Explore Fullscreen"
+              >
+                <ZoomIn size={12} />
+                <span>Zoom & Explore</span>
+              </button>
               
               {/* Complex Linear and Radial Dark Masks */}
               <div className="absolute inset-0 bg-gradient-to-t from-[#060708] via-[#060708]/30 to-transparent pointer-events-none" />
@@ -1398,15 +2056,18 @@ const ProjectDetailModal = ({
                     <motion.span
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
-                      className={`text-[9px] px-3 py-1 rounded-md border font-black uppercase tracking-[0.25em] ${
+                      className={`text-[9px] px-3 py-1 rounded-md border font-black uppercase tracking-[0.25em] flex items-center gap-1.5 ${
                         project.status === "Active"
                           ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
                           : project.status === "PENDING_DELETE"
-                            ? "border-red-500/40 bg-red-500/10 text-red-400"
-                            : "border-amber-500/40 bg-amber-500/10 text-amber-400"
+                            ? "border-red-500/60 bg-red-500/15 text-red-400 shadow-sm animate-breathe"
+                            : "border-amber-500/60 bg-amber-500/20 text-amber-300 shadow-sm animate-breathe"
                       }`}
                     >
-                      {project.status}
+                      {project.status !== "Active" && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-breathe-dot" />
+                      )}
+                      {project.status === "PENDING_DELETE" ? "Pending Deletion" : project.status}
                     </motion.span>
                     <motion.span
                       initial={{ opacity: 0, x: -10 }}
@@ -1660,6 +2321,9 @@ const ProjectDetailModal = ({
                           </div>
                         ))}
                       </div>
+
+                      {/* Construction Progress Roadmap Component */}
+                      <ProgressRoadmap project={project} />
  
                       {/* Builder Sales Advisory Message Block */}
                       {project.notes && (
@@ -2367,7 +3031,8 @@ const ProjectDetailModal = ({
                                 <Clock size={10} className="shrink-0" />;
 
                               return (
-                                <div
+                                <motion.div
+                                  layout
                                   key={u.id}
                                   className={`p-4 bg-white/[0.015] border rounded-2xl flex flex-col justify-between space-y-4 shadow-sm hover:scale-[1.01] transition-all duration-200 group relative ${
                                     isEditing ? "border-amber-500/70 shadow-[0_0_12px_rgba(242,162,30,0.1)]" : "border-white/[0.05] hover:border-white/10"
@@ -2481,7 +3146,27 @@ const ProjectDetailModal = ({
                                       </motion.div>
                                     )}
                                   </AnimatePresence>
-                                </div>
+
+                                  {/* Status Update Flash Overlay */}
+                                  <AnimatePresence>
+                                    {updatedUnits[u.id] && (
+                                      <motion.div
+                                        key={updatedUnits[u.id]}
+                                        initial={{ opacity: 0.85 }}
+                                        animate={{ opacity: 0 }}
+                                        exit={{ opacity: 0 }}
+                                        transition={{ duration: 1.2, ease: "easeOut" }}
+                                        className={`absolute inset-0 rounded-2xl pointer-events-none z-10 ${
+                                          u.status === "Available"
+                                            ? "bg-emerald-500/20 shadow-[inset_0_0_24px_rgba(16,185,129,0.45)] border border-emerald-500/50"
+                                            : u.status === "Sold"
+                                              ? "bg-red-500/20 shadow-[inset_0_0_24px_rgba(239,68,68,0.45)] border border-red-500/50"
+                                              : "bg-amber-500/20 shadow-[inset_0_0_24px_rgba(245,158,11,0.45)] border border-amber-500/50"
+                                        }`}
+                                      />
+                                    )}
+                                  </AnimatePresence>
+                                </motion.div>
                               );
                             })
                           ) : (
@@ -2506,57 +3191,55 @@ const ProjectDetailModal = ({
               {/* Right Column: Builder & Downloads */}
               <div className="lg:col-span-4 space-y-10">
                 {/* Builder Card with Gold Highlights */}
-                <div className="bg-gradient-to-b from-white/[0.02] to-transparent rounded-[24px] p-6.5 border border-white/[0.06] relative overflow-hidden group shadow-xl">
-                  <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/[0.02] rounded-full -mr-16 -mt-16 blur-[50px] group-hover:bg-amber-500/[0.04] transition-all duration-700" />
-                  <div className="relative z-10 space-y-6">
-                    <div className="space-y-4">
-                      <div className="w-12 h-12 bg-white/[0.03] rounded-2xl flex items-center justify-center text-amber-500 border border-white/[0.06] shadow-lg group-hover:scale-105 transition-transform duration-500">
-                        <Building2 size={22} strokeWidth={1.5} />
-                      </div>
-                      <div className="space-y-1.5">
-                        <h4 className="text-md font-semibold text-white leading-tight">
-                          {project.builderName || "General Builder"}
-                        </h4>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <div className="flex items-center gap-1.5 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20 shadow-inner">
-                            <span className="w-1 h-1 rounded-full bg-emerald-500" />
-                            <span className="text-[7.5px] text-emerald-400 font-extrabold uppercase tracking-wider">
-                              Verified Partner
+                <div className="bg-gradient-to-b from-surface-2 to-surface rounded-[24px] p-6 border border-border-dim hover:border-amber-primary/40 relative overflow-hidden group shadow-xl transition-all duration-300">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-amber-primary/5 rounded-full -mr-16 -mt-16 blur-[40px] group-hover:bg-amber-primary/10 transition-all duration-700" />
+                  <div className="relative z-10 space-y-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 bg-amber-primary/10 rounded-2xl flex items-center justify-center text-amber-primary border border-amber-primary/25 shadow-md group-hover:scale-105 transition-transform duration-500">
+                          <Building2 size={22} strokeWidth={1.5} />
+                        </div>
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-bold text-text-primary leading-tight">
+                            {project.builderName || "Master Builder"}
+                          </h4>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[8px] font-bold bg-amber-primary/15 text-amber-primary border border-amber-primary/30 uppercase tracking-wider">
+                              <Award size={10} /> Tier-1 Developer
                             </span>
-                          </div>
-                          
-                          <div className="flex items-center gap-1 text-amber-500">
-                            <Star size={9} fill="currentColor" />
-                            <span className="text-[7.5px] font-black uppercase tracking-wider">4.8 Rating</span>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[8px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                              <ShieldCheck size={10} /> RERA Verified
+                            </span>
                           </div>
                         </div>
                       </div>
                     </div>
                     
-                    <p className="text-[10px] text-white/50 leading-relaxed font-medium">
+                    <p className="text-[11px] text-text-secondary leading-relaxed font-medium">
                       {project.builderName === "M3M"
-                        ? "Founded in 2010, M3M India has quickly risen as one of India's most dynamic and innovative real estate developers, built on the values of ethical governance, transparency, commitment, and passion for excellence."
+                        ? "Founded in 2010, M3M India has quickly risen as one of India's most dynamic and innovative luxury real estate developers, built on the values of ethical governance, transparency, and architectural distinction."
                         : project.builderName === "DLF"
-                          ? "Founded in 1946 by Chaudhary Raghvendra Singh, DLF began with the development of 22 urban colonies in Delhi. Today, DLF is the largest publicly listed real estate company in India."
-                          : `A premier developer recognized for architectural innovation, timely deliveries, and commitment to delivering exceptional residential experiences across premium sectoral nodes.`}
+                          ? "Founded in 1946 by Chaudhary Raghvendra Singh, DLF began with the development of 22 urban colonies in Delhi. Today, DLF is the largest publicly listed real estate conglomerate in India."
+                          : `A premier Grade-A developer recognized for architectural innovation, timely deliveries, and commitment to delivering exceptional residential experiences across premium sectoral nodes.`}
                     </p>
 
-                    <div className="grid grid-cols-2 gap-3 pt-2.5 border-t border-white/[0.06]">
+                    <div className="grid grid-cols-2 gap-3 pt-3 border-t border-border-dim/60">
                       <div className="text-left">
-                        <div className="text-[7.5px] text-white/40 uppercase font-black tracking-widest leading-none">Legacy</div>
-                        <div className="text-xs font-black text-white mt-1">15+ Years</div>
+                        <div className="text-[8px] text-text-dim uppercase font-black tracking-widest leading-none">Deliveries</div>
+                        <div className="text-xs font-bold text-text-primary mt-1">45k+ Units Handed Over</div>
                       </div>
                       <div className="text-left">
-                        <div className="text-[7.5px] text-white/40 uppercase font-black tracking-widest leading-none">Deliveries</div>
-                        <div className="text-xs font-black text-white mt-1">45k+ Homes</div>
+                        <div className="text-[8px] text-text-dim uppercase font-black tracking-widest leading-none">Track Record</div>
+                        <div className="text-xs font-bold text-emerald-400 mt-1">98.4% On-Time Index</div>
                       </div>
                     </div>
 
                     <button
                       onClick={() => onViewBuilder(project.builderName || "General Builder")}
-                      className="w-full py-3.5 bg-white/[0.02] hover:bg-amber-500 border border-white/[0.06] hover:border-amber-500 rounded-xl text-[9px] font-black text-white hover:text-black uppercase tracking-[0.2em] transition-all duration-300 shadow-md cursor-pointer"
+                      className="w-full py-3 bg-amber-primary hover:bg-amber-primary/90 text-black rounded-xl text-[10px] font-black uppercase tracking-[0.18em] transition-all duration-300 shadow-md active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
                     >
-                      View Builder Profile
+                      <LayoutGrid size={13} />
+                      <span>Explore Developer Portfolio</span>
                     </button>
                   </div>
                 </div>
@@ -2676,10 +3359,8 @@ const ProjectDetailModal = ({
               {hasDeletePermission && onDelete && (
                 <button
                   onClick={() => {
-                    if (window.confirm("Are you sure you want to delete this listing?")) {
-                      onDelete(project);
-                      onClose();
-                    }
+                    onDelete(project);
+                    onClose();
                   }}
                   className="flex-1 sm:flex-none px-5 py-3.5 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-[9px] font-black uppercase tracking-[0.2em] hover:bg-red-500 hover:text-white transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
                 >
@@ -2697,6 +3378,15 @@ const ProjectDetailModal = ({
           </div>
         </div>
       </motion.div>
+
+      {isPreviewModalOpen && (
+        <ImagePreviewModal
+          images={images}
+          initialIndex={previewInitialIndex}
+          onClose={() => setIsPreviewModalOpen(false)}
+          showToast={showToast}
+        />
+      )}
     </div>
   );
 };
@@ -2706,6 +3396,10 @@ const ResalePropertyDetailModal = ({
   onClose,
   showToast,
   onViewBuilder,
+  onEdit,
+  onDelete,
+  hasEditPermission,
+  hasDeletePermission,
 }: {
   property: ResaleProperty;
   onClose: () => void;
@@ -2714,7 +3408,18 @@ const ResalePropertyDetailModal = ({
     type: "success" | "error" | "info" | "warning",
   ) => void;
   onViewBuilder: (name: string) => void;
+  onEdit?: (p: ResaleProperty) => void;
+  onDelete?: (p: ResaleProperty) => void;
+  hasEditPermission?: boolean;
+  hasDeletePermission?: boolean;
 }) => {
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [previewInitialIndex, setPreviewInitialIndex] = useState(0);
+
+  const images = property.images && property.images.length > 0
+    ? property.images
+    : [{ name: "Default View", size: 0, data: `https://picsum.photos/seed/${property.societyName}/1920/1080` }];
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6 select-none font-sans">
       {/* Blurred Deep Backdrop overlay */}
@@ -2745,28 +3450,46 @@ const ResalePropertyDetailModal = ({
             {/* Hero Interactive Area */}
             <div className="relative h-[220px] sm:h-[400px] lg:h-[480px] w-full overflow-hidden">
               <img
-                src={
-                  property.images && property.images.length > 0
-                    ? property.images[0].data
-                    : `https://picsum.photos/seed/${property.societyName}/1920/1080`
-                }
+                src={images[0].data}
                 alt={property.societyName}
                 referrerPolicy="no-referrer"
-                className="w-full h-full object-cover scale-102 filter brightness-[0.85]"
+                className="w-full h-full object-cover scale-102 filter brightness-[0.85] cursor-zoom-in hover:brightness-100 transition-all duration-300"
+                onClick={() => {
+                  setPreviewInitialIndex(0);
+                  setIsPreviewModalOpen(true);
+                }}
               />
+              
+              {/* Click to Zoom Overlay Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setPreviewInitialIndex(0);
+                  setIsPreviewModalOpen(true);
+                }}
+                className="absolute top-6 left-6 z-30 px-3.5 py-2 rounded-full bg-black/65 hover:bg-amber-500 text-white hover:text-black border border-white/10 backdrop-blur-md text-[10px] font-black uppercase tracking-[0.15em] flex items-center gap-2 transition-all duration-300 shadow-md hover:scale-105 cursor-pointer"
+                title="Zoom-in / Explore Fullscreen"
+              >
+                <ZoomIn size={12} />
+                <span>Zoom & Explore</span>
+              </button>
+
               <div className="absolute inset-0 bg-gradient-to-t from-[#13151A] via-[#13151A]/40 to-transparent" />
 
               <div className="absolute bottom-0 left-0 w-full p-6 sm:p-10.5 space-y-4">
                 <div className="flex flex-wrap items-center gap-2.5">
                   <span
-                    className={`text-[8px] px-3 py-1 rounded-md border font-black uppercase tracking-[0.2em] shadow-sm ${
+                    className={`text-[8px] px-3 py-1 rounded-md border font-black uppercase tracking-[0.2em] shadow-sm flex items-center gap-1.5 ${
                       property.status === "Active"
                         ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
                         : property.status === "Sold"
                           ? "border-red-500/30 bg-red-500/10 text-red-400"
-                          : "border-amber-500/30 bg-amber-500/10 text-amber-500"
+                          : "border-amber-500/60 bg-amber-500/20 text-amber-300 shadow-sm animate-breathe"
                     }`}
                   >
+                    {property.status !== "Active" && property.status !== "Sold" && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-breathe-dot" />
+                    )}
                     {property.status}
                   </span>
                   <span className="text-[8px] px-3 py-1 rounded-md border border-white/[0.08] bg-white/5 text-white/[0.6] font-black uppercase tracking-[0.2em]">
@@ -2890,7 +3613,11 @@ const ResalePropertyDetailModal = ({
                       {property.images.slice(1).map((img, idx) => (
                         <div
                           key={idx}
-                          className="relative aspect-[16/10] rounded-xl overflow-hidden border border-white/[0.05] hover:border-white/20 transition-all duration-300 group cursor-pointer shadow-md"
+                          onClick={() => {
+                            setPreviewInitialIndex(idx + 1);
+                            setIsPreviewModalOpen(true);
+                          }}
+                          className="relative aspect-[16/10] rounded-xl overflow-hidden border border-white/[0.05] hover:border-white/20 transition-all duration-300 group cursor-zoom-in shadow-md"
                         >
                           <img
                             src={img.data}
@@ -3002,35 +3729,35 @@ const ResalePropertyDetailModal = ({
               {/* Right Column: Original Developer Profile and Layout blueprints */}
               <div className="lg:col-span-4 space-y-10">
                 {/* Original Developer Segment Details */}
-                <div className="bg-gradient-to-b from-white/[0.02] to-transparent rounded-[24px] p-6.5 border border-white/[0.05] relative overflow-hidden group shadow-xl">
-                  <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/[0.02] rounded-full -mr-16 -mt-16 blur-[50px] group-hover:bg-amber-500/[0.04] transition-all duration-700" />
+                <div className="bg-gradient-to-b from-surface-2 to-surface rounded-[24px] p-6 border border-border-dim hover:border-amber-primary/40 relative overflow-hidden group shadow-xl transition-all duration-300">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-amber-primary/5 rounded-full -mr-16 -mt-16 blur-[40px] group-hover:bg-amber-primary/10 transition-all duration-700" />
                   <div className="relative z-10 space-y-5">
                     <div className="flex items-center gap-3.5">
-                      <div className="w-11 h-11 bg-white/[0.03] border border-white/[0.06] rounded-xl flex items-center justify-center text-amber-500 shadow-md">
-                        <Building2 size={20} />
+                      <div className="w-12 h-12 bg-amber-primary/10 border border-amber-primary/25 rounded-2xl flex items-center justify-center text-amber-primary shadow-md group-hover:scale-105 transition-transform duration-500">
+                        <Building2 size={22} />
                       </div>
                       <div>
-                        <h4 className="text-[13px] font-semibold text-white">
-                          {property.builderName || "General Builder"}
+                        <h4 className="text-sm font-bold text-text-primary">
+                          {property.builderName || "Master Builder"}
                         </h4>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                          <span className="text-[7.5px] text-amber-500 font-extrabold uppercase tracking-widest">
-                            Original Developer
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[8px] font-bold bg-amber-primary/15 text-amber-primary border border-amber-primary/30 uppercase tracking-wider">
+                            <Award size={10} /> Tier-1 Master Developer
                           </span>
                         </div>
                       </div>
                     </div>
-                    <p className="text-[10px] text-white/50 leading-relaxed font-semibold">
-                      The original authorized development company of this prime society, offering robust specifications and vetted regional planning approvals in {property.location}.
+                    <p className="text-[11px] text-text-secondary leading-relaxed font-medium">
+                      The original authorized development company of this prime society, offering robust structural specifications, verified title clearances, and prime regional infrastructure access in {property.location}.
                     </p>
                     <button
                       onClick={() =>
                         onViewBuilder(property.builderName || "General Builder")
                       }
-                      className="w-full py-3 bg-white/[0.02] hover:bg-amber-500 hover:text-black border border-white/[0.06] hover:border-amber-500 rounded-xl text-[9px] font-black text-white uppercase tracking-[0.2em] transition-all duration-300"
+                      className="w-full py-3 bg-amber-primary hover:bg-amber-primary/90 text-black rounded-xl text-[10px] font-black uppercase tracking-[0.18em] transition-all duration-300 shadow-md active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
                     >
-                      View Builder Portfolio
+                      <LayoutGrid size={13} />
+                      <span>Explore Developer Portfolio</span>
                     </button>
                   </div>
                 </div>
@@ -3124,15 +3851,50 @@ const ResalePropertyDetailModal = ({
               </div>
             </div>
 
-            <button
-              onClick={onClose}
-              className="w-full sm:w-auto px-10 py-3.5 bg-amber-500 hover:bg-amber-400 text-black rounded-xl text-[9px] font-black uppercase tracking-[0.2em] transition-all shadow-xl shadow-amber-500/10 active:scale-95 cursor-pointer"
-            >
-              Close Asset Details
-            </button>
+            <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-end">
+              {hasEditPermission && onEdit && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEdit(property);
+                  }}
+                  className="px-6 py-3.5 bg-blue-500/10 hover:bg-blue-500 hover:text-white border border-blue-500/30 text-blue-400 rounded-xl text-[9px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Edit size={12} />
+                  <span>Edit</span>
+                </button>
+              )}
+              {hasDeletePermission && onDelete && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(property);
+                  }}
+                  className="px-6 py-3.5 bg-red-500/10 hover:bg-red-500 hover:text-white border border-red-500/30 text-red-500 rounded-xl text-[9px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Trash2 size={12} />
+                  <span>Delete</span>
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="w-full sm:w-auto px-10 py-3.5 bg-amber-500 hover:bg-amber-400 text-black rounded-xl text-[9px] font-black uppercase tracking-[0.2em] transition-all shadow-xl shadow-amber-500/10 active:scale-95 cursor-pointer"
+              >
+                Close Asset Details
+              </button>
+            </div>
           </div>
         </div>
       </motion.div>
+
+      {isPreviewModalOpen && (
+        <ImagePreviewModal
+          images={images}
+          initialIndex={previewInitialIndex}
+          onClose={() => setIsPreviewModalOpen(false)}
+          showToast={showToast}
+        />
+      )}
     </div>
   );
 };
@@ -3146,6 +3908,7 @@ const ProfileView = ({
   showToast,
   autoSave,
   onResetCredentials,
+  logs = [],
 }: {
   user: User | null;
   onUpdate: (data: Partial<User>) => void;
@@ -3155,6 +3918,7 @@ const ProfileView = ({
   showToast: (msg: string, type?: any) => void;
   autoSave: boolean;
   onResetCredentials: (id: string) => Promise<void>;
+  logs?: any[];
 }) => {
   const [formData, setFormData] = useState({
     name: user?.name || "",
@@ -3164,11 +3928,41 @@ const ProfileView = ({
     phoneNumber: user?.phoneNumber || "",
   });
   const [isEditing, setIsEditing] = useState(false);
+  const [activeProfileTab, setActiveProfileTab] = useState<
+    "overview" | "security" | "activity"
+  >("overview");
+  const [searchActivityText, setSearchActivityText] = useState("");
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
   const canChangeRole = currentUserRole === "admin";
   const permissions = user ? ROLE_PERMISSIONS[user.role] || [] : [];
   const previewPermissions = formData.role
     ? ROLE_PERMISSIONS[formData.role] || []
     : [];
+
+  // Filter logs associated with this user
+  const userLogs = useMemo(() => {
+    if (!user) return [];
+    return logs.filter(
+      (l) =>
+        l.userId === user.id ||
+        l.username === user.username ||
+        l.performedBy === user.name ||
+        l.email === user.email
+    );
+  }, [logs, user]);
+
+  const filteredUserLogs = useMemo(() => {
+    if (!searchActivityText.trim()) return userLogs;
+    const q = searchActivityText.toLowerCase();
+    return userLogs.filter(
+      (l) =>
+        (l.action && l.action.toLowerCase().includes(q)) ||
+        (l.details && l.details.toLowerCase().includes(q)) ||
+        (l.target && l.target.toLowerCase().includes(q)) ||
+        (l.ip && l.ip.toLowerCase().includes(q))
+    );
+  }, [userLogs, searchActivityText]);
 
   useEffect(() => {
     if (user) {
@@ -3182,19 +3976,32 @@ const ProfileView = ({
     }
   }, [user]);
 
+  const copyToClipboard = (text: string, label: string) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    setCopiedField(label);
+    showToast(`Copied ${label} to clipboard`, "success");
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // Validate file type
-      const validTypes = ["image/jpeg", "image/jpg", "image/svg+xml"];
+      const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/svg+xml"];
       if (!validTypes.includes(file.type)) {
-        showToast("Please upload only JPEG or SVG images", "error");
+        showToast("Please upload JPEG, PNG, or SVG images", "error");
+        return;
+      }
+
+      if (file.size > 5 * 1024 * 1024) {
+        showToast("Image size must be under 5MB", "error");
         return;
       }
 
       const reader = new FileReader();
       reader.onloadend = () => {
-        setFormData({ ...formData, profilePicture: reader.result as string });
+        setFormData((prev) => ({ ...prev, profilePicture: reader.result as string }));
+        showToast("Profile image updated in form", "info");
       };
       reader.readAsDataURL(file);
     }
@@ -3212,462 +4019,713 @@ const ProfileView = ({
     }
   };
 
+  const isOnline =
+    user?.lastActive &&
+    new Date().getTime() - new Date(user.lastActive).getTime() < 300000;
+
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
+      initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
-      className="w-full space-y-8 pb-12"
+      transition={{ duration: 0.3, ease: "easeOut" }}
+      className="w-full space-y-6 pb-16 font-sans max-w-7xl mx-auto"
     >
-      {/* Header */}
-      <header className="flex justify-between items-center">
-        <div className="flex items-center gap-4">
+      {/* Navigation Header Bar */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-[#0D0E12] border border-white/[0.08] p-4 rounded-2xl shadow-xl backdrop-blur-md">
+        <div className="flex items-center gap-3">
           {!isSelf && onBack && (
             <button
               onClick={onBack}
-              className="p-2 hover:bg-surface-2 rounded-full transition-colors"
-              aria-label="Back"
+              className="p-2.5 bg-white/[0.04] hover:bg-amber-500/20 hover:border-amber-500/40 border border-white/10 rounded-xl transition-all duration-200 text-text-dim hover:text-amber-primary cursor-pointer group"
+              title="Back to Users"
             >
-              <ChevronRight size={18} className="rotate-180 text-text-dim" />
+              <ChevronLeft size={18} className="group-hover:-translate-x-0.5 transition-transform" />
             </button>
           )}
-          <h1 className="text-2xl font-bold text-text-primary tracking-tight">
-            {isSelf ? "My Profile" : "User Profile"}
-          </h1>
-        </div>
-        {!isEditing && (
-          <button
-            onClick={() => setIsEditing(true)}
-            className="px-5 py-2 bg-text-primary text-bg rounded-full text-xs font-bold hover:opacity-90 transition-all flex items-center gap-2"
-          >
-            <Activity size={14} /> Edit Profile
-          </button>
-        )}
-      </header>
-
-      {/* Hero Section */}
-      <div className="bg-surface border border-border-dim rounded-2xl md:rounded-3xl p-6 md:p-8 flex flex-col md:flex-row gap-6 md:gap-8 items-center md:items-start shadow-sm relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-primary/0 via-amber-primary/50 to-amber-primary/0" />
-
-        <div className="relative group">
-          <div className="w-24 h-24 md:w-32 md:h-32 rounded-full bg-surface-2 border-4 border-bg flex items-center justify-center text-3xl md:text-4xl font-bold text-amber-primary shadow-xl overflow-hidden relative">
-            {formData.profilePicture ? (
-              <img
-                src={formData.profilePicture}
-                alt={user?.name || "User"}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center bg-amber-primary/10">
-                {user?.name?.[0] || "?"}
-              </div>
-            )}
-
-            {isEditing && (
-              <label className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity ">
-                <ImageIcon size={24} className="text-white mb-1" />
-                <span className="text-[8px] text-white font-bold uppercase tracking-widest">
-                  Change
-                </span>
-                <input
-                  type="file"
-                  className="hidden"
-                  accept=".jpg,.jpeg,.svg"
-                  onChange={handleFileChange}
-                />
-              </label>
-            )}
-          </div>
-          <div className="absolute bottom-2 right-2 w-6 h-6 bg-surface rounded-full flex items-center justify-center border-4 border-bg shadow-lg">
-            <div
-              className={`w-3 h-3 rounded-full ${
-                user?.lastActive &&
-                new Date().getTime() - new Date(user.lastActive).getTime() <
-                  300000
-                  ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]"
-                  : "bg-text-dim"
-              }`}
-            />
-          </div>
-        </div>
-
-        <div className="flex-1 text-center md:text-left space-y-3 w-full">
           <div>
-            <h2 className="text-2xl md:text-3xl font-bold text-text-primary tracking-tight break-words">
-              {user?.name || "Unknown User"}
-            </h2>
-            <p className="text-[10px] md:text-xs text-text-dim font-mono mt-1 break-all">
-              {user?.email}
-            </p>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-amber-primary px-2 py-0.5 rounded bg-amber-primary/10 border border-amber-primary/20">
+                {isSelf ? "Personal Account" : "User Profile"}
+              </span>
+              <span className="text-xs text-text-dim">• ID: {user?.id?.slice(0, 8)}</span>
+            </div>
+            <h1 className="text-xl sm:text-2xl font-bold text-text-primary tracking-tight mt-0.5">
+              {isSelf ? "My Profile & Account" : `${user?.name || "User"}'s Account`}
+            </h1>
           </div>
-          <div className="flex flex-wrap justify-center md:justify-start gap-2 md:gap-3">
-            <span className="px-3 md:px-4 py-1 md:py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase tracking-widest bg-amber-primary/10 text-amber-primary border border-amber-primary/20">
-              {user?.role === "admin"
-                ? "Super Admin"
-                : user?.role?.replace("_", " ") || "Employee"}
+        </div>
+
+        <div className="flex items-center gap-3 w-full sm:w-auto">
+          {!isEditing ? (
+            <button
+              onClick={() => setIsEditing(true)}
+              className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-bold text-xs rounded-xl shadow-lg shadow-amber-500/20 transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+            >
+              <Edit size={14} /> Edit Profile
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditing(false);
+                  if (user) {
+                    setFormData({
+                      name: user.name,
+                      email: user.email,
+                      role: user.role,
+                      profilePicture: user.profilePicture || "",
+                      phoneNumber: user.phoneNumber || "",
+                    });
+                  }
+                }}
+                className="flex-1 sm:flex-initial px-4 py-2.5 bg-white/[0.05] hover:bg-white/[0.1] border border-white/10 rounded-xl text-xs font-semibold text-text-secondary hover:text-text-primary transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmit}
+                className="flex-1 sm:flex-initial px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-bold text-xs rounded-xl shadow-lg shadow-amber-500/20 transition-all duration-200 flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
+              >
+                <Check size={15} /> Save Changes
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Main Luxury Hero Banner Card */}
+      <div className="relative bg-[#0F1015] border border-white/[0.08] rounded-3xl overflow-hidden shadow-2xl">
+        {/* Ambient Decorative Background */}
+        <div className="h-32 sm:h-40 bg-gradient-to-r from-amber-950/60 via-amber-900/30 to-black/80 relative overflow-hidden border-b border-white/[0.06]">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(245,158,11,0.18),transparent_50%)]" />
+          <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff05_1px,transparent_1px),linear-gradient(to_bottom,#ffffff05_1px,transparent_1px)] bg-[size:24px_24px]" />
+          <div className="absolute -top-12 -right-12 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+          
+          <div className="absolute top-4 right-4 flex items-center gap-2">
+            <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider backdrop-blur-md flex items-center gap-1.5 border ${
+              isOnline
+                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                : "bg-white/5 text-text-dim border-white/10"
+            }`}>
+              <span className={`w-2 h-2 rounded-full ${isOnline ? "bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]" : "bg-text-dim"}`} />
+              {isOnline ? "Active Now" : user?.lastActive ? `Active ${new Date(user.lastActive).toLocaleDateString()}` : "Offline"}
             </span>
-            <span className="px-3 md:px-4 py-1 md:py-1.5 rounded-full text-[9px] md:text-[10px] font-bold uppercase tracking-widest bg-surface-2 text-text-secondary border border-border-bright">
-              ID: {user?.id?.slice(0, 8)}
+          </div>
+        </div>
+
+        {/* User Content Info Strip */}
+        <div className="px-6 sm:px-8 pb-8 pt-0 relative z-10 flex flex-col md:flex-row items-center md:items-end justify-between gap-6 -mt-16 sm:-mt-20">
+          <div className="flex flex-col sm:flex-row items-center sm:items-end gap-5 text-center sm:text-left w-full md:w-auto">
+            {/* Avatar Frame */}
+            <div className="relative group shrink-0">
+              <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-2xl bg-[#090A0D] p-1.5 ring-4 ring-amber-500/30 shadow-2xl shadow-amber-500/15 relative overflow-hidden group">
+                {formData.profilePicture ? (
+                  <img
+                    src={formData.profilePicture}
+                    alt={user?.name || "User Avatar"}
+                    className="w-full h-full object-cover rounded-xl transition-transform duration-500 group-hover:scale-105"
+                  />
+                ) : (
+                  <div className="w-full h-full rounded-xl bg-gradient-to-br from-amber-500/20 to-amber-900/40 border border-amber-500/30 flex items-center justify-center text-3xl sm:text-4xl font-black text-amber-primary uppercase">
+                    {user?.name?.[0] || "?"}
+                  </div>
+                )}
+
+                {/* File Upload Overlay when Editing */}
+                {isEditing && (
+                  <label className="absolute inset-0 bg-black/70 backdrop-blur-xs flex flex-col items-center justify-center cursor-pointer opacity-0 group-hover:opacity-100 transition-all duration-200 rounded-xl">
+                    <Camera size={26} className="text-amber-primary mb-1 animate-bounce" />
+                    <span className="text-[10px] text-white font-bold uppercase tracking-wider">
+                      Upload Photo
+                    </span>
+                    <span className="text-[8px] text-text-dim font-mono">JPG / PNG / SVG</span>
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".jpg,.jpeg,.png,.svg"
+                      onChange={handleFileChange}
+                    />
+                  </label>
+                )}
+              </div>
+
+              {/* Status Badge */}
+              <div className="absolute -bottom-1 -right-1 p-1 bg-[#090A0D] rounded-full border border-white/10 shadow-lg">
+                <div className={`w-4 h-4 rounded-full flex items-center justify-center ${
+                  isOnline ? "bg-emerald-500 text-black" : "bg-text-dim text-black"
+                }`}>
+                  <CheckCircle2 size={12} className="text-black" />
+                </div>
+              </div>
+            </div>
+
+            {/* User Meta Data */}
+            <div className="space-y-2 mb-1 w-full sm:w-auto">
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2.5">
+                <h2 className="text-2xl sm:text-3xl font-bold text-text-primary tracking-tight">
+                  {user?.name || "Unknown User"}
+                </h2>
+                <BadgeCheck size={22} className="text-amber-primary fill-amber-primary/20 shrink-0" />
+                <span className={`px-3 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest border shadow-sm ${
+                  user?.role === "admin"
+                    ? "bg-amber-500/15 text-amber-400 border-amber-500/40 shadow-amber-500/10"
+                    : user?.role === "team_leader"
+                    ? "bg-indigo-500/15 text-indigo-400 border-indigo-500/40"
+                    : "bg-emerald-500/15 text-emerald-400 border-emerald-500/40"
+                }`}>
+                  {user?.role === "admin" ? "Super Admin" : user?.role?.replace("_", " ") || "Employee"}
+                </span>
+              </div>
+
+              {/* Quick Info Badges */}
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 text-xs text-text-dim font-mono">
+                <button
+                  onClick={() => user?.email && copyToClipboard(user.email, "Email")}
+                  className="px-3 py-1 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] rounded-lg transition-all flex items-center gap-1.5 hover:text-amber-primary cursor-pointer"
+                  title="Click to copy email"
+                >
+                  <Mail size={13} className="text-amber-primary/70" />
+                  <span>{user?.email}</span>
+                  {copiedField === "Email" ? <Check size={12} className="text-emerald-400" /> : <Copy size={11} className="opacity-60" />}
+                </button>
+
+                {user?.phoneNumber && (
+                  <button
+                    onClick={() => copyToClipboard(user.phoneNumber!, "Phone")}
+                    className="px-3 py-1 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] rounded-lg transition-all flex items-center gap-1.5 hover:text-amber-primary cursor-pointer"
+                    title="Click to copy phone"
+                  >
+                    <Phone size={13} className="text-amber-primary/70" />
+                    <span>{user.phoneNumber}</span>
+                    {copiedField === "Phone" ? <Check size={12} className="text-emerald-400" /> : <Copy size={11} className="opacity-60" />}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Actions / Share */}
+          <div className="flex items-center gap-2 w-full md:w-auto justify-center">
+            <button
+              onClick={() => user?.id && copyToClipboard(user.id, "User ID")}
+              className="px-4 py-2 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] rounded-xl text-xs font-mono font-medium text-text-secondary hover:text-white transition-all flex items-center gap-2 cursor-pointer"
+            >
+              <Copy size={13} className="text-amber-primary" />
+              <span>ID: {user?.id?.slice(0, 8)}...</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Metric Cards Banner Strip */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 border-t border-white/[0.08] divide-x divide-y sm:divide-y-0 divide-white/[0.08] bg-black/20">
+          <div className="p-4 sm:p-5 text-center sm:text-left space-y-1">
+            <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-text-dim">
+              Access Role
             </span>
+            <div className="text-sm sm:text-base font-bold text-text-primary capitalize flex items-center gap-1.5 justify-center sm:justify-start">
+              <ShieldCheck size={16} className="text-amber-primary" />
+              {user?.role?.replace("_", " ") || "Employee"}
+            </div>
+          </div>
+
+          <div className="p-4 sm:p-5 text-center sm:text-left space-y-1">
+            <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-text-dim">
+              Permissions Granted
+            </span>
+            <div className="text-sm sm:text-base font-bold text-amber-primary flex items-center gap-1.5 justify-center sm:justify-start">
+              <Sparkles size={16} className="text-amber-primary" />
+              {permissions.length} System Rules
+            </div>
+          </div>
+
+          <div className="p-4 sm:p-5 text-center sm:text-left space-y-1">
+            <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-text-dim">
+              Security Status
+            </span>
+            <div className="text-sm sm:text-base font-bold text-emerald-400 flex items-center gap-1.5 justify-center sm:justify-start">
+              <Lock size={15} className="text-emerald-400" />
+              Verified Account
+            </div>
+          </div>
+
+          <div className="p-4 sm:p-5 text-center sm:text-left space-y-1">
+            <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-text-dim">
+              Logged Audit Actions
+            </span>
+            <div className="text-sm sm:text-base font-bold text-text-primary flex items-center gap-1.5 justify-center sm:justify-start">
+              <History size={16} className="text-amber-primary" />
+              {userLogs.length} Events Logged
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Two-Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
-        {/* Main Column (65%) */}
-        <section className="lg:col-span-2 space-y-6 md:space-y-8">
-          {isEditing ? (
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <h3 className="text-base md:text-lg font-bold text-text-primary tracking-tight">
-                Edit Information
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
-                <div className="space-y-2">
-                  <label className="text-[10px] text-text-dim uppercase tracking-wider font-bold">
-                    Full Name
-                  </label>
-                  <input
-                    value={formData.name}
-                    onChange={(e) =>
-                      setFormData({ ...formData, name: e.target.value })
-                    }
-                    onBlur={handleBlur}
-                    className="w-full bg-surface-2 border border-border-bright rounded-xl px-4 py-3 text-sm outline-none focus:border-amber-primary transition-all"
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] text-text-dim uppercase tracking-wider font-bold">
-                    Email Address
-                  </label>
-                  <input
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) =>
-                      setFormData({ ...formData, email: e.target.value })
-                    }
-                    onBlur={handleBlur}
-                    className="w-full bg-surface-2 border border-border-bright rounded-xl px-4 py-3 text-sm outline-none focus:border-amber-primary transition-all"
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] text-text-dim uppercase tracking-wider font-bold">
-                    Phone Number
-                  </label>
-                  <input
-                    type="tel"
-                    value={formData.phoneNumber}
-                    onChange={(e) =>
-                      setFormData({ ...formData, phoneNumber: e.target.value })
-                    }
-                    onBlur={handleBlur}
-                    placeholder="Enter phone number"
-                    className="w-full bg-surface-2 border border-border-bright rounded-xl px-4 py-3 text-sm outline-none focus:border-amber-primary transition-all"
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] text-text-dim uppercase tracking-wider font-bold">
-                    Profile Picture
-                  </label>
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-full bg-surface-2 border border-border-bright overflow-hidden flex-shrink-0">
-                      {formData.profilePicture ? (
-                        <img
-                          src={formData.profilePicture}
-                          alt="Preview"
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-text-dim">
-                          <ImageIcon size={20} />
-                        </div>
-                      )}
-                    </div>
-                    <label className="flex-1">
-                      <div className="w-full bg-surface-2 border border-border-bright rounded-xl px-4 py-3 text-xs text-text-secondary cursor-pointer hover:border-amber-primary transition-all flex items-center justify-between">
-                        <span>
-                          {formData.profilePicture
-                            ? "Change Image"
-                            : "Choose JPEG or SVG"}
-                        </span>
-                        <Plus size={14} />
-                      </div>
-                      <input
-                        type="file"
-                        accept=".jpg,.jpeg,.svg"
-                        onChange={handleFileChange}
-                        className="hidden"
-                      />
-                    </label>
+      {/* Tabs Controller */}
+      <div className="flex border-b border-white/[0.08] gap-2 overflow-x-auto pb-0">
+        <button
+          onClick={() => setActiveProfileTab("overview")}
+          className={`px-5 py-3 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition-all duration-200 cursor-pointer whitespace-nowrap ${
+            activeProfileTab === "overview"
+              ? "border-amber-primary text-amber-primary bg-amber-primary/5 rounded-t-xl"
+              : "border-transparent text-text-dim hover:text-text-primary hover:bg-white/[0.02] rounded-t-xl"
+          }`}
+        >
+          <User size={16} /> Overview & Details
+        </button>
+
+        <button
+          onClick={() => setActiveProfileTab("security")}
+          className={`px-5 py-3 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition-all duration-200 cursor-pointer whitespace-nowrap ${
+            activeProfileTab === "security"
+              ? "border-amber-primary text-amber-primary bg-amber-primary/5 rounded-t-xl"
+              : "border-transparent text-text-dim hover:text-text-primary hover:bg-white/[0.02] rounded-t-xl"
+          }`}
+        >
+          <ShieldCheck size={16} /> Security & Permissions
+        </button>
+
+        <button
+          onClick={() => setActiveProfileTab("activity")}
+          className={`px-5 py-3 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition-all duration-200 cursor-pointer whitespace-nowrap ${
+            activeProfileTab === "activity"
+              ? "border-amber-primary text-amber-primary bg-amber-primary/5 rounded-t-xl"
+              : "border-transparent text-text-dim hover:text-text-primary hover:bg-white/[0.02] rounded-t-xl"
+          }`}
+        >
+          <History size={16} /> Activity Log ({userLogs.length})
+        </button>
+      </div>
+
+      {/* Tab Panels */}
+      <AnimatePresence mode="wait">
+        {activeProfileTab === "overview" && (
+          <motion.div
+            key="overview"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            className="space-y-6"
+          >
+            {isEditing ? (
+              <form onSubmit={handleSubmit} className="bg-[#0E0F14] border border-white/[0.08] rounded-3xl p-6 sm:p-8 space-y-6 shadow-xl">
+                <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-text-primary">Edit Personal Information</h3>
+                    <p className="text-xs text-text-dim mt-0.5">
+                      Update profile details, contact number, and avatar image.
+                    </p>
                   </div>
-                  <p className="text-[9px] text-text-dim italic">
-                    Supported formats: JPEG, JPG, SVG only.
+                  <span className="text-[10px] font-mono text-amber-primary bg-amber-primary/10 border border-amber-primary/20 px-2.5 py-1 rounded-full">
+                    {autoSave ? "Auto-Save Enabled" : "Manual Save"}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  {/* Full Name */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary flex items-center gap-1.5">
+                      <User size={14} className="text-amber-primary" /> Full Name
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      onBlur={handleBlur}
+                      className="w-full bg-[#14161F] border border-white/10 rounded-xl px-4 py-3 text-sm text-text-primary outline-none focus:border-amber-primary focus:ring-1 focus:ring-amber-primary/50 transition-all font-medium"
+                      placeholder="Enter full name"
+                      required
+                    />
+                  </div>
+
+                  {/* Email Address */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary flex items-center gap-1.5">
+                      <Mail size={14} className="text-amber-primary" /> Email Address
+                    </label>
+                    <input
+                      type="email"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      onBlur={handleBlur}
+                      className="w-full bg-[#14161F] border border-white/10 rounded-xl px-4 py-3 text-sm text-text-primary outline-none focus:border-amber-primary focus:ring-1 focus:ring-amber-primary/50 transition-all font-medium"
+                      placeholder="user@example.com"
+                      required
+                    />
+                  </div>
+
+                  {/* Phone Number */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary flex items-center gap-1.5">
+                      <Phone size={14} className="text-amber-primary" /> Phone Number
+                    </label>
+                    <input
+                      type="tel"
+                      value={formData.phoneNumber}
+                      onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
+                      onBlur={handleBlur}
+                      placeholder="+91 98765 43210"
+                      className="w-full bg-[#14161F] border border-white/10 rounded-xl px-4 py-3 text-sm text-text-primary outline-none focus:border-amber-primary focus:ring-1 focus:ring-amber-primary/50 transition-all font-medium"
+                    />
+                  </div>
+
+                  {/* Profile Picture Uploader */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-wider text-text-secondary flex items-center gap-1.5">
+                      <ImageIcon size={14} className="text-amber-primary" /> Profile Image URL / File
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-xl bg-surface-2 border border-white/10 overflow-hidden shrink-0 flex items-center justify-center">
+                        {formData.profilePicture ? (
+                          <img
+                            src={formData.profilePicture}
+                            alt="Preview"
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <ImageIcon size={20} className="text-text-dim" />
+                        )}
+                      </div>
+                      <label className="flex-1 cursor-pointer">
+                        <div className="w-full bg-[#14161F] border border-white/10 hover:border-amber-primary rounded-xl px-4 py-3 text-xs text-text-secondary hover:text-white transition-all flex items-center justify-between">
+                          <span>{formData.profilePicture ? "Change Image File" : "Choose JPEG, PNG or SVG"}</span>
+                          <Plus size={14} className="text-amber-primary" />
+                        </div>
+                        <input
+                          type="file"
+                          accept=".jpg,.jpeg,.png,.svg"
+                          onChange={handleFileChange}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/[0.08]">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(false)}
+                    className="px-5 py-2.5 bg-white/[0.05] hover:bg-white/[0.1] border border-white/10 rounded-xl text-xs font-semibold text-text-secondary hover:text-text-primary transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-bold text-xs rounded-xl shadow-lg shadow-amber-500/20 transition-all cursor-pointer"
+                  >
+                    Save Details
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Personal Information Tile */}
+                <div className="bg-[#0E0F14] border border-white/[0.08] rounded-3xl p-6 space-y-5 shadow-xl">
+                  <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
+                    <h3 className="text-base font-bold text-text-primary flex items-center gap-2">
+                      <User size={16} className="text-amber-primary" /> Personal Information
+                    </h3>
+                    <button
+                      onClick={() => setIsEditing(true)}
+                      className="text-xs text-amber-primary hover:underline font-semibold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Edit size={12} /> Edit
+                    </button>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center p-3 bg-white/[0.02] border border-white/[0.04] rounded-2xl">
+                      <div>
+                        <div className="text-[10px] font-mono text-text-dim uppercase tracking-wider font-bold">Full Name</div>
+                        <div className="text-sm font-semibold text-text-primary mt-0.5">{user?.name}</div>
+                      </div>
+                      <User size={16} className="text-amber-primary/50" />
+                    </div>
+
+                    <div className="flex justify-between items-center p-3 bg-white/[0.02] border border-white/[0.04] rounded-2xl">
+                      <div>
+                        <div className="text-[10px] font-mono text-text-dim uppercase tracking-wider font-bold">Email Address</div>
+                        <div className="text-sm font-semibold text-text-primary mt-0.5">{user?.email}</div>
+                      </div>
+                      <button
+                        onClick={() => user?.email && copyToClipboard(user.email, "Email")}
+                        className="p-1.5 text-text-dim hover:text-amber-primary transition-colors cursor-pointer"
+                        title="Copy email"
+                      >
+                        <Copy size={14} />
+                      </button>
+                    </div>
+
+                    <div className="flex justify-between items-center p-3 bg-white/[0.02] border border-white/[0.04] rounded-2xl">
+                      <div>
+                        <div className="text-[10px] font-mono text-text-dim uppercase tracking-wider font-bold">Phone Number</div>
+                        <div className="text-sm font-semibold text-text-primary mt-0.5">
+                          {user?.phoneNumber || "Not specified"}
+                        </div>
+                      </div>
+                      <Phone size={16} className="text-amber-primary/50" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Account Credentials & Meta Tile */}
+                <div className="bg-[#0E0F14] border border-white/[0.08] rounded-3xl p-6 space-y-5 shadow-xl">
+                  <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
+                    <h3 className="text-base font-bold text-text-primary flex items-center gap-2">
+                      <ShieldCheck size={16} className="text-amber-primary" /> System Identity
+                    </h3>
+                    <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+                      Verified
+                    </span>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center p-3 bg-white/[0.02] border border-white/[0.04] rounded-2xl">
+                      <div>
+                        <div className="text-[10px] font-mono text-text-dim uppercase tracking-wider font-bold">Internal UUID</div>
+                        <div className="text-xs font-mono text-amber-primary mt-0.5">{user?.id}</div>
+                      </div>
+                      <button
+                        onClick={() => user?.id && copyToClipboard(user.id, "User ID")}
+                        className="p-1.5 text-text-dim hover:text-amber-primary transition-colors cursor-pointer"
+                        title="Copy ID"
+                      >
+                        <Copy size={14} />
+                      </button>
+                    </div>
+
+                    <div className="flex justify-between items-center p-3 bg-white/[0.02] border border-white/[0.04] rounded-2xl">
+                      <div>
+                        <div className="text-[10px] font-mono text-text-dim uppercase tracking-wider font-bold">Username Code</div>
+                        <div className="text-sm font-mono text-text-primary mt-0.5">{user?.username || user?.email?.split("@")[0]}</div>
+                      </div>
+                      <UserCheck size={16} className="text-amber-primary/50" />
+                    </div>
+
+                    <div className="flex justify-between items-center p-3 bg-white/[0.02] border border-white/[0.04] rounded-2xl">
+                      <div>
+                        <div className="text-[10px] font-mono text-text-dim uppercase tracking-wider font-bold">Role Classification</div>
+                        <div className="text-sm font-semibold text-amber-primary capitalize mt-0.5">
+                          {user?.role?.replace("_", " ")}
+                        </div>
+                      </div>
+                      <Award size={16} className="text-amber-primary/50" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {activeProfileTab === "security" && (
+          <motion.div
+            key="security"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            className="grid grid-cols-1 lg:grid-cols-3 gap-6"
+          >
+            {/* Left 2 Cols: Role & Permissions */}
+            <div className="lg:col-span-2 space-y-6">
+              <div className="bg-[#0E0F14] border border-white/[0.08] rounded-3xl p-6 space-y-6 shadow-xl">
+                <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
+                  <div>
+                    <h3 className="text-base font-bold text-text-primary flex items-center gap-2">
+                      <ShieldCheck size={18} className="text-amber-primary" /> Role & System Permissions
+                    </h3>
+                    <p className="text-xs text-text-dim mt-0.5">
+                      Permissions control access to features, databases, and administrative operations.
+                    </p>
+                  </div>
+
+                  {isEditing && canChangeRole && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-amber-primary font-mono uppercase font-bold">Change Role:</span>
+                      <select
+                        value={formData.role}
+                        onChange={(e) => setFormData({ ...formData, role: e.target.value as Role })}
+                        className="bg-[#14161F] border border-amber-primary/40 text-amber-primary text-xs font-bold rounded-xl px-3 py-1.5 outline-none"
+                      >
+                        <option value="employee">Employee</option>
+                        <option value="team_leader">Team Leader</option>
+                        <option value="admin">Super Admin</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                {/* Categorized Permissions Grid */}
+                <div className="space-y-4">
+                  {PERMISSION_CATEGORIES.map((category) => {
+                    const activePerms = (isEditing ? previewPermissions : permissions).filter((p) =>
+                      category.permissions.includes(p)
+                    );
+                    const hasPerms = activePerms.length > 0;
+
+                    return (
+                      <div
+                        key={category.name}
+                        className={`p-4 rounded-2xl border transition-all ${
+                          hasPerms
+                            ? "bg-white/[0.02] border-white/[0.08]"
+                            : "bg-black/20 border-white/[0.03] opacity-50"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2.5">
+                          <span className="text-xs font-bold uppercase tracking-wider text-amber-primary flex items-center gap-1.5">
+                            <Sparkles size={13} /> {category.name}
+                          </span>
+                          <span className="text-[10px] font-mono text-text-dim">
+                            {activePerms.length} / {category.permissions.length} Enabled
+                          </span>
+                        </div>
+
+                        {hasPerms ? (
+                          <div className="flex flex-wrap gap-2">
+                            {activePerms.map((p) => (
+                              <span
+                                key={p}
+                                className="px-2.5 py-1 bg-amber-primary/10 border border-amber-primary/20 rounded-lg text-[10px] font-mono text-amber-primary flex items-center gap-1.5"
+                              >
+                                <Check size={10} />
+                                {p?.replace(/_/g, " ")}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-text-dim italic">
+                            No permissions granted for this role category.
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Security Compliance Card */}
+              <div className="p-5 bg-amber-primary/5 rounded-2xl border border-amber-primary/20 flex items-start gap-3">
+                <AlertCircle size={20} className="text-amber-primary shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-amber-primary">
+                    Audit Compliance & Access Governance
+                  </h4>
+                  <p className="text-xs text-text-dim leading-relaxed">
+                    All administrative updates and role changes are timestamped and permanently logged in the central audit ledger.
                   </p>
                 </div>
               </div>
+            </div>
 
-              <div className="flex flex-col sm:flex-row gap-3 md:gap-4 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setIsEditing(false)}
-                  className="w-full sm:w-auto px-6 py-3 rounded-full text-xs font-bold text-text-secondary hover:text-text-primary transition-all bg-surface-2 sm:bg-transparent"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="w-full sm:w-auto px-8 py-3 rounded-full text-xs font-bold text-bg bg-amber-primary hover:bg-amber-secondary transition-all shadow-lg shadow-amber-primary/20"
-                >
-                  Save Changes
-                </button>
+            {/* Right Col: Credential Manager */}
+            <div className="space-y-6">
+              <div className="bg-[#0E0F14] border border-white/[0.08] rounded-3xl p-6 space-y-5 shadow-xl">
+                <h3 className="text-base font-bold text-text-primary flex items-center gap-2 border-b border-white/[0.08] pb-3">
+                  <Key size={16} className="text-amber-primary" /> Credential Management
+                </h3>
+                {user && (
+                  <CredentialManager
+                    user={user}
+                    onResetCredentials={() => onResetCredentials(user.id)}
+                  />
+                )}
               </div>
-            </form>
-          ) : (
-            <div className="space-y-6 md:space-y-8">
-              <h3 className="text-base md:text-lg font-bold text-text-primary tracking-tight">
-                Account Details
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-8">
-                <div className="space-y-1">
-                  <div className="text-[10px] text-text-dim uppercase tracking-widest font-bold">
-                    Full Name
-                  </div>
-                  <div className="text-sm text-text-primary">
-                    {user?.name || "Unknown User"}
-                  </div>
+            </div>
+          </motion.div>
+        )}
+
+        {activeProfileTab === "activity" && (
+          <motion.div
+            key="activity"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            className="space-y-6"
+          >
+            <div className="bg-[#0E0F14] border border-white/[0.08] rounded-3xl p-6 sm:p-8 space-y-6 shadow-xl">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-white/[0.08] pb-4">
+                <div>
+                  <h3 className="text-base font-bold text-text-primary flex items-center gap-2">
+                    <History size={18} className="text-amber-primary" /> User Activity Ledger
+                  </h3>
+                  <p className="text-xs text-text-dim mt-0.5">
+                    Real-time action history and system events performed by this account.
+                  </p>
                 </div>
-                <div className="space-y-1">
-                  <div className="text-[10px] text-text-dim uppercase tracking-widest font-bold">
-                    Email Address
-                  </div>
-                  <div className="text-sm text-text-primary">
-                    {user?.email || "Not provided"}
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-[10px] text-text-dim uppercase tracking-widest font-bold">
-                    Phone Number
-                  </div>
-                  <div className="text-sm text-text-primary">
-                    {user?.phoneNumber || "Not provided"}
-                  </div>
+
+                <div className="relative w-full sm:w-64">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim" />
+                  <input
+                    type="text"
+                    value={searchActivityText}
+                    onChange={(e) => setSearchActivityText(e.target.value)}
+                    placeholder="Search activity logs..."
+                    className="w-full bg-[#14161F] border border-white/10 rounded-xl pl-9 pr-3 py-2 text-xs text-text-primary outline-none focus:border-amber-primary transition-all"
+                  />
                 </div>
               </div>
 
-              {user?.permissions && user.permissions.length > 0 && (
-                <div className="space-y-4 pt-6 border-t border-border-dim">
-                  <div className="text-[10px] text-text-dim uppercase tracking-widest font-bold">
-                    Permissions
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {user.permissions.map((p) => (
-                      <span
-                        key={p}
-                        className="px-3 py-1.5 bg-surface-2 border border-border-bright rounded-full text-[10px] font-mono text-text-secondary"
+              {filteredUserLogs.length > 0 ? (
+                <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
+                  {filteredUserLogs.map((log, index) => {
+                    const crudInfo = getCrudInfo(log.action || "");
+                    return (
+                      <div
+                        key={log.id || index}
+                        className="p-4 bg-white/[0.02] hover:bg-white/[0.04] border border-white/[0.06] rounded-2xl transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 group"
                       >
-                        {p?.replace(/_/g, " ")}
-                      </span>
-                    ))}
-                  </div>
+                        <div className="flex items-start gap-3">
+                          <span
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold uppercase border shrink-0 ${crudInfo.badgeColor}`}
+                          >
+                            {crudInfo.type}
+                          </span>
+                          <div className="space-y-1">
+                            <div className="text-xs font-bold text-text-primary group-hover:text-amber-primary transition-colors">
+                              {log.action || "System Event"}
+                            </div>
+                            <div className="text-xs text-text-dim">
+                              {log.details || log.target || "Operation executed successfully."}
+                            </div>
+                            {log.ip && (
+                              <div className="text-[10px] font-mono text-text-dim/60">
+                                IP Address: {log.ip}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <span className="text-[10px] font-mono text-text-dim flex items-center gap-1 justify-end">
+                            <Clock size={11} className="text-amber-primary/70" />
+                            {log.timestamp ? new Date(log.timestamp).toLocaleString() : "Recent"}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="p-12 text-center space-y-3 bg-white/[0.01] border border-dashed border-white/10 rounded-2xl">
+                  <Activity size={32} className="mx-auto text-amber-primary/40" />
+                  <div className="text-sm font-bold text-text-primary">No Activity Records Found</div>
+                  <p className="text-xs text-text-dim max-w-sm mx-auto">
+                    {searchActivityText
+                      ? "No logs matched your search filter."
+                      : "User actions (project edits, uploads, logins) will automatically appear here."}
+                  </p>
                 </div>
               )}
             </div>
-          )}
-
-          {/* Recent Activity */}
-          <div className="bg-surface border border-border-dim p-6 rounded-2xl shadow-sm space-y-6">
-            <h3 className="text-sm font-bold text-text-primary uppercase tracking-widest border-b border-border-dim pb-4">
-              Recent Activity
-            </h3>
-            <div
-              className="space-y-4 max-h-64 overflow-y-auto pr-2"
-              aria-live="polite"
-            >
-              <div className="text-sm text-text-dim italic">
-                Activity log will appear here.
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Context Column (35%) */}
-        <aside className="space-y-8">
-          <div className="bg-surface border border-border-dim p-6 rounded-2xl shadow-sm space-y-6">
-            <h3 className="text-sm font-bold text-text-primary uppercase tracking-widest border-b border-border-dim pb-4 flex items-center gap-2">
-              <ShieldCheck size={16} className="text-amber-primary" />
-              Security & Access
-            </h3>
-
-            {isEditing && canChangeRole ? (
-              <div className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] text-text-dim uppercase tracking-wider font-bold">
-                    Role Assignment
-                  </label>
-                  <select
-                    value={formData.role}
-                    onChange={(e) =>
-                      setFormData({ ...formData, role: e.target.value as Role })
-                    }
-                    className="w-full bg-surface-2 border border-border-bright rounded-lg px-4 py-2.5 text-sm outline-none focus:border-amber-primary transition-all"
-                  >
-                    <option value="employee">Employee</option>
-                    <option value="team_leader">Team Leader</option>
-                    <option value="admin">Super Admin</option>
-                  </select>
-                  {isSelf && user?.role === "admin" && (
-                    <p className="text-[9px] text-amber-500/70 italic mt-1">
-                      Note: Changing your own role may restrict your access.
-                    </p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <div className="text-[10px] text-text-dim uppercase tracking-widest font-bold flex justify-between">
-                    <span>Preview Permissions</span>
-                    <span className="text-amber-primary lowercase font-mono">
-                      ({formData.role})
-                    </span>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    {PERMISSION_CATEGORIES.map((category) => {
-                      const rolePerms = previewPermissions.filter((p) =>
-                        category.permissions.includes(p),
-                      );
-                      if (rolePerms.length === 0) return null;
-                      return (
-                        <div key={category.name} className="space-y-1">
-                          <div className="text-[8px] text-amber-primary/70 uppercase tracking-widest font-bold">
-                            {category.name}
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {rolePerms.map((p) => (
-                              <span
-                                key={p}
-                                className="bg-amber-primary/5 px-1.5 py-0.5 rounded border border-amber-primary/20 text-[8px] font-mono text-amber-primary tracking-tight"
-                              >
-                                {p?.replace(/_/g, " ")}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="space-y-1">
-                  <div className="text-[10px] text-text-dim uppercase tracking-widest font-bold">
-                    Current Role
-                  </div>
-                  <div className="text-sm text-text-primary capitalize">
-                    {user?.role ?? "Unknown"}
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <div className="text-[10px] text-text-dim uppercase tracking-widest font-bold">
-                    Permissions
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    {PERMISSION_CATEGORIES.map((category) => {
-                      const rolePerms = permissions.filter((p) =>
-                        category.permissions.includes(p),
-                      );
-                      if (rolePerms.length === 0) return null;
-                      return (
-                        <div key={category.name} className="space-y-1">
-                          <div className="text-[8px] text-amber-primary/70 uppercase tracking-widest font-bold">
-                            {category.name}
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            {rolePerms.map((p) => (
-                              <span
-                                key={p}
-                                className="bg-surface-2 px-2 py-1 rounded border border-border-bright text-[9px] font-mono text-text-secondary tracking-tight"
-                              >
-                                {p?.replace(/_/g, " ")}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {user && (
-              <div className="pt-6 border-t border-border-dim">
-                <CredentialManager
-                  user={user}
-                  onResetCredentials={() => onResetCredentials(user.id)}
-                />
-              </div>
-            )}
-          </div>
-
-          <div className="bg-surface border border-border-dim p-6 rounded-2xl shadow-sm space-y-6">
-            <h3 className="text-sm font-bold text-text-primary uppercase tracking-widest border-b border-border-dim pb-4 flex items-center gap-2">
-              <Activity size={16} className="text-text-dim" />
-              Account Meta
-            </h3>
-            <div className="space-y-4">
-              <div className="space-y-1">
-                <div className="text-[10px] text-text-dim uppercase tracking-widest font-bold">
-                  Internal ID
-                </div>
-                <div className="text-xs font-mono text-text-primary bg-surface-2 px-3 py-1.5 rounded border border-border-bright inline-block">
-                  {user?.id || "Unknown"}
-                </div>
-              </div>
-              <div className="space-y-1">
-                <div className="text-[10px] text-text-dim uppercase tracking-widest font-bold">
-                  Username
-                </div>
-                <div className="text-xs font-mono text-amber-primary bg-surface-2 px-3 py-1.5 rounded border border-border-bright inline-block">
-                  {user?.username || "Unknown"}
-                </div>
-              </div>
-              <div className="space-y-1">
-                <div className="text-[10px] text-text-dim uppercase tracking-widest font-bold">
-                  Last Active
-                </div>
-                <div className="text-xs text-text-primary">
-                  {user?.lastActive &&
-                  new Date().getTime() - new Date(user.lastActive).getTime() <
-                    300000 ? (
-                    <span className="text-green-500 font-medium">
-                      Active Now
-                    </span>
-                  ) : user?.lastActive ? (
-                    new Date(user.lastActive).toLocaleString()
-                  ) : (
-                    "Never active"
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-5 bg-amber-primary/5 rounded-xl border border-amber-primary/10">
-            <div className="flex items-center gap-2 text-amber-primary mb-2">
-              <AlertCircle size={14} />
-              <span className="text-[10px] font-bold uppercase tracking-widest">
-                Compliance Note
-              </span>
-            </div>
-            <p className="text-[10px] text-text-dim leading-relaxed">
-              All profile modifications are logged in the system audit trail.
-              Ensure changes comply with the organizational data privacy policy.
-            </p>
-          </div>
-        </aside>
-      </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };
@@ -3695,14 +4753,15 @@ const getCrudInfo = (action: string) => {
   if (
     normAction === "LOGIN" ||
     normAction === "LOGOUT" ||
-    normAction === "LOGIN_FAILED"
+    normAction === "LOGIN_FAILED" ||
+    normAction.startsWith("READ")
   ) {
     return {
       type: "READ",
       badgeColor: "text-purple-500 bg-purple-500/10 border-purple-500/30",
-      title: "Session & Auth (READ)",
+      title: "Data Access & Auth (READ)",
       description:
-        "Action Triggered: READ operation. Authenticated credentials, established secure session, or read-only validation check.",
+        "Action Triggered: READ operation. Queried database records, retrieved directory/project data, or established secure user session.",
     };
   }
 
@@ -3753,13 +4812,19 @@ const LogsView = ({
   const [sortBy, setSortBy] = useState("timestamp");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [selectedLog, setSelectedLog] = useState<any>(null);
+  const [viewMode, setViewMode] = useState<"table" | "grid">("table");
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const logsToProcess = logs;
+
+
+  const logsToProcess = logs || [];
 
   const actionCategories = [
-    { label: "All Audit Actions", value: "ALL" },
+    { label: "All Events", value: "ALL" },
     {
-      label: "Access Events",
+      label: "Access / Auth",
       value: "AUTH",
       actions: [
         "LOGIN",
@@ -3770,7 +4835,7 @@ const LogsView = ({
       ],
     },
     {
-      label: "Project CRUD",
+      label: "Projects",
       value: "PROJECTS",
       actions: [
         "ADD_PROJECT",
@@ -3782,12 +4847,12 @@ const LogsView = ({
       ],
     },
     {
-      label: "Resale/Listing CRUD",
+      label: "Resale",
       value: "RESALE",
       actions: ["ADD_RESALE", "EDIT_RESALE", "DELETE_RESALE", "READ_RESALE"],
     },
     {
-      label: "User CRUD & Admin",
+      label: "Users & Teams",
       value: "USERS",
       actions: [
         "USER_CREATED",
@@ -3798,7 +4863,7 @@ const LogsView = ({
       ],
     },
     {
-      label: "Approval Events",
+      label: "Approvals",
       value: "APPROVALS",
       actions: [
         "APPROVE",
@@ -3811,7 +4876,7 @@ const LogsView = ({
       ],
     },
     {
-      label: "System & Reports",
+      label: "System & Database",
       value: "SYSTEM",
       actions: [
         "READ_DATABASE",
@@ -3827,7 +4892,7 @@ const LogsView = ({
   ];
 
   const uniqueActions = Array.from(
-    new Set(logsToProcess.map((l) => l.action)),
+    new Set(logsToProcess.map((l) => l.action).filter(Boolean)),
   ).sort();
 
   const filteredLogs = logsToProcess.filter((log) => {
@@ -3840,7 +4905,7 @@ const LogsView = ({
       specificAction === "ALL" || log.action === specificAction;
 
     const matchesUser =
-      !userSearch || log.user.toLowerCase().includes(userSearch.toLowerCase());
+      !userSearch || (log.user && log.user.toLowerCase().includes(userSearch.toLowerCase()));
     const matchesKeyword =
       !keywordSearch ||
       (log.summary &&
@@ -3865,9 +4930,28 @@ const LogsView = ({
   const sortedLogs = [...filteredLogs].sort((a, b) => {
     const valA = a[sortBy as keyof typeof a];
     const valB = b[sortBy as keyof typeof b];
+    if (!valA) return 1;
+    if (!valB) return -1;
     if (sortOrder === "asc") return valA > valB ? 1 : -1;
     return valA < valB ? 1 : -1;
   });
+
+  const totalPages = Math.max(1, Math.ceil(sortedLogs.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIndex = (safePage - 1) * pageSize;
+  const paginatedLogs = sortedLogs.slice(startIndex, startIndex + pageSize);
+
+  // Compute stats
+  const totalCount = logsToProcess.length;
+  const authCount = logsToProcess.filter((l) =>
+    ["LOGIN", "LOGOUT", "LOGIN_FAILED", "SECURITY_UPDATE"].includes(l.action),
+  ).length;
+  const crudCount = logsToProcess.filter((l) =>
+    ["CREATE", "UPDATE", "DELETE", "ADD_PROJECT", "EDIT_PROJECT", "ADD_RESALE", "EDIT_RESALE"].some(a => l.action?.includes(a)),
+  ).length;
+  const approvalCount = logsToProcess.filter((l) =>
+    ["APPROVE", "REJECT", "APPROVE_EDIT", "REJECT_EDIT"].some(a => l.action?.includes(a)),
+  ).length;
 
   const handleExport = () => {
     if (onExport) {
@@ -3880,9 +4964,9 @@ const LogsView = ({
       ...sortedLogs.map((log) =>
         [
           new Date(log.timestamp).toLocaleString(),
-          `"${log.user}"`,
-          `"${log.action}"`,
-          `"${log.summary.replace(/"/g, '""')}"`,
+          `"${log.user || ""}"`,
+          `"${log.action || ""}"`,
+          `"${(log.summary || "").replace(/"/g, '""')}"`,
         ].join(","),
       ),
     ].join("\n");
@@ -3919,47 +5003,64 @@ const LogsView = ({
     !!dateTo,
   ].filter(Boolean).length;
 
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
   return (
-    <div className="space-y-6 w-full max-w-none">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div className="flex flex-col">
-            <h1 className="text-2xl font-serif font-bold text-text-primary">
-              Audit Logs
-            </h1>
+    <div className="space-y-5 w-full max-w-none font-sans">
+      {/* Header & Quick Action Row */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-2xl bg-surface/60 backdrop-blur-xl border border-border-dim/50 shadow-lg">
+        <div className="flex items-center gap-3.5">
+          <div className="w-10 h-10 rounded-xl bg-amber-primary/10 border border-amber-primary/20 flex items-center justify-center text-amber-primary shrink-0 shadow-inner">
+            <Activity size={20} className="animate-pulse" />
           </div>
-          <div className="text-[10px] text-text-dim uppercase tracking-widest font-bold bg-surface-2 px-3 py-1.5 rounded-lg border border-border-dim">
-            {filteredLogs.length} Records
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-bold text-text-primary tracking-tight">
+                Audit Trail & System Logs
+              </h1>
+              <span className="px-2 py-0.5 rounded-md bg-amber-primary/15 text-amber-primary border border-amber-primary/30 text-[9px] font-black uppercase tracking-wider">
+                Live Feed
+              </span>
+            </div>
+            <p className="text-xs text-text-dim">
+              Security activity, CRUD database updates, and permission changes
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <button
             onClick={handleExport}
-            className="flex items-center gap-2 px-4 py-2 bg-surface-2 border border-border-dim rounded-xl text-xs font-bold uppercase tracking-widest text-text-secondary hover:border-amber-primary/50 transition-all"
+            className="flex items-center gap-2 px-3.5 py-1.5 bg-black/40 hover:bg-black/70 border border-white/10 hover:border-amber-primary/40 rounded-xl text-xs font-bold uppercase tracking-wider text-text-secondary hover:text-amber-primary transition-all shadow-sm cursor-pointer"
           >
-            <Download size={14} />
-            Export CSV
+            <Download size={13} />
+            <span>Export CSV</span>
           </button>
 
+          {/* Filter Trigger Button */}
           <div className="relative">
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all text-xs font-bold uppercase tracking-widest ${
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl border transition-all text-xs font-bold uppercase tracking-wider cursor-pointer ${
                 showFilters || activeFiltersCount > 0
-                  ? "bg-amber-primary border-amber-primary text-bg shadow-lg shadow-amber-primary/20"
-                  : "bg-surface-2 border-border-dim text-text-secondary hover:border-amber-primary/50"
+                  ? "bg-amber-primary text-black border-amber-primary shadow-lg shadow-amber-primary/20"
+                  : "bg-black/40 border-white/10 text-text-secondary hover:border-white/20 hover:text-white"
               }`}
             >
-              <Filter size={14} />
-              Filters
+              <SlidersHorizontal size={13} />
+              <span>Filters</span>
               {activeFiltersCount > 0 && (
-                <span className="ml-1 w-4 h-4 bg-white text-amber-primary rounded-full flex items-center justify-center text-[9px] font-black">
+                <span className="w-4 h-4 bg-black text-amber-primary rounded-full flex items-center justify-center text-[9px] font-black">
                   {activeFiltersCount}
                 </span>
               )}
             </button>
 
+            {/* Advanced Filters Popover Drawer */}
             <AnimatePresence>
               {showFilters && (
                 <>
@@ -3968,24 +5069,22 @@ const LogsView = ({
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     onClick={() => setShowFilters(false)}
-                    className="fixed inset-0 z-40"
+                    className="fixed inset-0 z-40 bg-black/30 backdrop-blur-xs"
                   />
                   <motion.div
-                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    initial={{ opacity: 0, y: 8, scale: 0.96 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                    className="absolute right-0 mt-3 w-[320px] sm:w-[400px] bg-surface border border-border-bright rounded-2xl shadow-2xl z-50 p-6 space-y-6"
+                    exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                    className="absolute right-0 mt-2 w-[320px] sm:w-[420px] bg-surface/95 backdrop-blur-2xl border border-border-dim/80 rounded-2xl shadow-2xl z-50 p-5 space-y-4"
                   >
-                    <div className="flex items-center justify-between border-b border-border-dim pb-4">
-                      <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-text-primary">
-                        Filter Options
-                      </h4>
-                      {(filter !== "ALL" ||
-                        userSearch ||
-                        dateFrom ||
-                        dateTo ||
-                        specificAction !== "ALL" ||
-                        keywordSearch) && (
+                    <div className="flex items-center justify-between border-b border-border-dim/40 pb-3">
+                      <div className="flex items-center gap-2">
+                        <Filter size={14} className="text-amber-primary" />
+                        <h4 className="text-xs font-black uppercase tracking-wider text-text-primary">
+                          Advanced Search & Filters
+                        </h4>
+                      </div>
+                      {activeFiltersCount > 0 && (
                         <button
                           onClick={() => {
                             setFilter("ALL");
@@ -3994,45 +5093,52 @@ const LogsView = ({
                             setKeywordSearch("");
                             setDateFrom("");
                             setDateTo("");
+                            setCurrentPage(1);
                           }}
-                          className="text-[9px] text-amber-primary font-bold uppercase tracking-widest hover:underline"
+                          className="text-[10px] text-amber-primary font-bold uppercase tracking-wider hover:underline cursor-pointer"
                         >
                           Reset All
                         </button>
                       )}
                     </div>
 
-                    <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-2">
-                          <label className="text-[9px] text-text-dim uppercase tracking-wider font-black">
-                            Action Category
+                    <div className="space-y-3.5 max-h-[60vh] overflow-y-auto pr-1 no-scrollbar">
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div className="space-y-1">
+                          <label className="text-[9px] text-text-dim uppercase tracking-wider font-extrabold">
+                            Category
                           </label>
                           <select
                             value={filter}
-                            onChange={(e) => setFilter(e.target.value)}
-                            className="w-full bg-surface-2 border border-border-bright rounded-xl px-4 py-2.5 text-xs text-text-primary outline-none focus:border-amber-primary transition-colors"
+                            onChange={(e) => {
+                              setFilter(e.target.value);
+                              setCurrentPage(1);
+                            }}
+                            className="w-full bg-black/50 border border-white/10 rounded-xl px-3 py-2 text-xs text-text-primary focus:outline-none focus:border-amber-primary/50"
                           >
                             {actionCategories.map((cat) => (
-                              <option key={cat.value} value={cat.value}>
+                              <option key={cat.value} value={cat.value} className="bg-black text-white">
                                 {cat.label}
                               </option>
                             ))}
                           </select>
                         </div>
 
-                        <div className="space-y-2">
-                          <label className="text-[9px] text-text-dim uppercase tracking-wider font-black">
-                            Specific Action (CRUD)
+                        <div className="space-y-1">
+                          <label className="text-[9px] text-text-dim uppercase tracking-wider font-extrabold">
+                            CRUD Action
                           </label>
                           <select
                             value={specificAction}
-                            onChange={(e) => setSpecificAction(e.target.value)}
-                            className="w-full bg-surface-2 border border-border-bright rounded-xl px-4 py-2.5 text-xs text-text-primary outline-none focus:border-amber-primary transition-colors"
+                            onChange={(e) => {
+                              setSpecificAction(e.target.value);
+                              setCurrentPage(1);
+                            }}
+                            className="w-full bg-black/50 border border-white/10 rounded-xl px-3 py-2 text-xs text-text-primary focus:outline-none focus:border-amber-primary/50"
                           >
-                            <option value="ALL">All Actions</option>
+                            <option value="ALL" className="bg-black text-white">All Actions</option>
                             {uniqueActions.map((action) => (
-                              <option key={action} value={action}>
+                              <option key={action} value={action} className="bg-black text-white">
                                 {action}
                               </option>
                             ))}
@@ -4040,60 +5146,72 @@ const LogsView = ({
                         </div>
                       </div>
 
-                      <div className="space-y-2">
-                        <label className="text-[9px] text-text-dim uppercase tracking-wider font-black">
-                          Search Summary Keyword
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-text-dim uppercase tracking-wider font-extrabold">
+                          User Name / Email
                         </label>
                         <div className="relative">
                           <Search
                             size={12}
-                            className="absolute left-4 top-1/2 -translate-y-1/2 text-text-dim"
-                          />
-                          <input
-                            type="text"
-                            value={keywordSearch}
-                            onChange={(e) => setKeywordSearch(e.target.value)}
-                            placeholder="Resource ID, keyword..."
-                            className="w-full bg-surface-2 border border-border-bright rounded-xl pl-10 pr-4 py-2.5 text-xs text-text-primary outline-none focus:border-amber-primary transition-colors"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-[9px] text-text-dim uppercase tracking-wider font-black">
-                          Search User
-                        </label>
-                        <div className="relative">
-                          <Search
-                            size={12}
-                            className="absolute left-4 top-1/2 -translate-y-1/2 text-text-dim"
+                            className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim"
                           />
                           <input
                             type="text"
                             value={userSearch}
-                            onChange={(e) => setUserSearch(e.target.value)}
-                            placeholder="Name or Email..."
-                            className="w-full bg-surface-2 border border-border-bright rounded-xl pl-10 pr-4 py-2.5 text-xs text-text-primary outline-none focus:border-amber-primary transition-colors"
+                            onChange={(e) => {
+                              setUserSearch(e.target.value);
+                              setCurrentPage(1);
+                            }}
+                            placeholder="Filter by user..."
+                            className="w-full bg-black/50 border border-white/10 rounded-xl pl-8 pr-3 py-2 text-xs text-text-primary focus:outline-none focus:border-amber-primary/50"
                           />
                         </div>
                       </div>
 
-                      <div className="space-y-2">
-                        <label className="text-[9px] text-text-dim uppercase tracking-wider font-black">
-                          Date & Time Range
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-text-dim uppercase tracking-wider font-extrabold">
+                          Summary Keywords
                         </label>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="relative">
+                          <Search
+                            size={12}
+                            className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim"
+                          />
+                          <input
+                            type="text"
+                            value={keywordSearch}
+                            onChange={(e) => {
+                              setKeywordSearch(e.target.value);
+                              setCurrentPage(1);
+                            }}
+                            placeholder="Search in log details..."
+                            className="w-full bg-black/50 border border-white/10 rounded-xl pl-8 pr-3 py-2 text-xs text-text-primary focus:outline-none focus:border-amber-primary/50"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[9px] text-text-dim uppercase tracking-wider font-extrabold">
+                          Date Range
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
                           <input
                             type="datetime-local"
                             value={dateFrom}
-                            onChange={(e) => setDateFrom(e.target.value)}
-                            className="w-full bg-surface-2 border border-border-bright rounded-xl px-4 py-2.5 text-[10px] text-text-primary outline-none focus:border-amber-primary [color-scheme:dark]"
+                            onChange={(e) => {
+                              setDateFrom(e.target.value);
+                              setCurrentPage(1);
+                            }}
+                            className="w-full bg-black/50 border border-white/10 rounded-xl px-2.5 py-1.5 text-[10px] text-text-primary focus:outline-none focus:border-amber-primary/50 [color-scheme:dark]"
                           />
                           <input
                             type="datetime-local"
                             value={dateTo}
-                            onChange={(e) => setDateTo(e.target.value)}
-                            className="w-full bg-surface-2 border border-border-bright rounded-xl px-4 py-2.5 text-[10px] text-text-primary outline-none focus:border-amber-primary [color-scheme:dark]"
+                            onChange={(e) => {
+                              setDateTo(e.target.value);
+                              setCurrentPage(1);
+                            }}
+                            className="w-full bg-black/50 border border-white/10 rounded-xl px-2.5 py-1.5 text-[10px] text-text-primary focus:outline-none focus:border-amber-primary/50 [color-scheme:dark]"
                           />
                         </div>
                       </div>
@@ -4101,9 +5219,9 @@ const LogsView = ({
 
                     <button
                       onClick={() => setShowFilters(false)}
-                      className="w-full py-3 bg-amber-primary text-bg rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-amber-secondary transition-all"
+                      className="w-full py-2 bg-amber-primary text-black rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-amber-400 transition-all cursor-pointer"
                     >
-                      Apply Filters
+                      Apply & Close
                     </button>
                   </motion.div>
                 </>
@@ -4113,159 +5231,383 @@ const LogsView = ({
         </div>
       </div>
 
-      <div className="bg-surface border border-border-dim rounded-2xl overflow-hidden shadow-xl">
-        <div className="overflow-x-auto no-scrollbar">
-          <table className="w-full text-left text-xs min-w-[800px]">
-            <thead className="bg-surface-2 border-b border-border-dim">
-              <tr>
-                <th
-                  className="px-6 py-4 font-bold text-text-dim uppercase tracking-widest whitespace-nowrap cursor-pointer hover:text-text-primary transition-colors"
-                  onClick={() => toggleSort("timestamp")}
-                >
-                  <div className="flex items-center gap-2">
-                    Timestamp
-                    {sortBy === "timestamp" &&
-                      (sortOrder === "asc" ? (
-                        <ChevronUp size={12} />
-                      ) : (
-                        <ChevronDown size={12} />
-                      ))}
-                  </div>
-                </th>
-                <th
-                  className="px-6 py-4 font-bold text-text-dim uppercase tracking-widest whitespace-nowrap cursor-pointer hover:text-text-primary transition-colors"
-                  onClick={() => toggleSort("user")}
-                >
-                  <div className="flex items-center gap-2">
-                    User
-                    {sortBy === "user" &&
-                      (sortOrder === "asc" ? (
-                        <ChevronUp size={12} />
-                      ) : (
-                        <ChevronDown size={12} />
-                      ))}
-                  </div>
-                </th>
-                <th
-                  className="px-6 py-4 font-bold text-text-dim uppercase tracking-widest whitespace-nowrap cursor-pointer hover:text-text-primary transition-colors"
-                  onClick={() => toggleSort("action")}
-                >
-                  <div className="flex items-center gap-2">
-                    Action
-                    {sortBy === "action" &&
-                      (sortOrder === "asc" ? (
-                        <ChevronUp size={12} />
-                      ) : (
-                        <ChevronDown size={12} />
-                      ))}
-                  </div>
-                </th>
-                <th
-                  className="px-6 py-4 font-bold text-text-dim uppercase tracking-widest whitespace-nowrap cursor-pointer hover:text-text-primary transition-colors"
-                  onClick={() => toggleSort("summary")}
-                >
-                  <div className="flex items-center gap-2">
-                    Summary
-                    {sortBy === "summary" && (
-                      <span className="text-amber-primary">
-                        {sortOrder === "asc" ? "↑" : "↓"}
-                      </span>
-                    )}
-                  </div>
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border-dim">
-              {sortedLogs.map((log) => (
-                <tr
-                  key={log.id}
-                  className="hover:bg-surface-2 transition-colors cursor-pointer"
-                  onClick={() => setSelectedLog(log)}
-                >
-                  <td className="px-6 py-4 text-text-secondary font-mono whitespace-nowrap">
-                    <div className="flex flex-col">
-                      <span>
-                        {new Date(log.timestamp).toLocaleDateString()}
-                      </span>
-                      <span className="text-[10px] text-text-dim">
-                        {new Date(log.timestamp).toLocaleTimeString()}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-text-primary font-medium whitespace-nowrap">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-amber-primary/10 flex items-center justify-center text-[10px] font-bold text-amber-primary">
-                        {log.user.charAt(0).toUpperCase()}
-                      </div>
-                      {log.user}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="relative group inline-block">
-                      <span
-                        className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-widest cursor-help transition-all duration-150 relative z-10 ${
-                          log.action?.includes("DELETE") ||
-                          log.action?.includes("REJECT") ||
-                          log.action?.includes("FAILED")
-                            ? "bg-red-500/10 text-red-500 hover:bg-red-500/25"
-                            : log.action?.includes("ADD") ||
-                                log.action?.includes("APPROVE") ||
-                                log.action?.includes("SIGNUP") ||
-                                log.action?.includes("CREATE")
-                              ? "bg-green-500/10 text-green-500 hover:bg-green-500/25"
-                              : log.action?.includes("EDIT") ||
-                                  log.action?.includes("UPDATE")
-                                ? "bg-blue-500/10 text-blue-500 hover:bg-blue-500/25"
-                                : "bg-amber-500/10 text-amber-500"
-                        }`}
-                        title={`${getCrudInfo(log.action).title}: ${getCrudInfo(log.action).description}`}
-                      >
-                        {log.action?.replace(/_/g, " ")}
-                      </span>
-                      <div className="absolute left-full top-1/2 -translate-y-1/2 ml-3 hidden group-hover:block w-72 bg-surface-2 border border-border-bright p-3.5 rounded-xl shadow-[0_12px_36px_rgba(0,0,0,0.6)] z-50 pointer-events-none select-none text-left">
-                        <div className="flex items-center gap-2 mb-1.5 pb-1.5 border-b border-border-dim/50">
-                          <span
-                            className={`text-[8px] px-1.5 py-0.5 rounded font-black border uppercase tracking-wider ${getCrudInfo(log.action).badgeColor}`}
-                          >
-                            {getCrudInfo(log.action).type}
-                          </span>
-                          <span className="text-[10px] font-bold text-text-primary uppercase tracking-wider">
-                            {getCrudInfo(log.action).title}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-text-secondary leading-relaxed font-sans mb-1.5">
-                          {getCrudInfo(log.action).description}
-                        </p>
-                        <div className="flex items-center justify-between text-[8px] font-mono uppercase tracking-[0.15em] text-text-dim">
-                          <span>Action: {log.action}</span>
-                          <span>Verified Event</span>
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                  <td
-                    className="px-6 py-4 text-text-secondary min-w-[200px] whitespace-normal"
-                    title={log.summary}
-                  >
-                    <div className="line-clamp-1">{log.summary}</div>
-                  </td>
-                </tr>
-              ))}
-              {sortedLogs.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={4}
-                    className="px-6 py-12 text-center text-text-dim italic"
-                  >
-                    No logs found matching the selected filters.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+      {/* Overview Stat Cards Grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+        <div className="p-3.5 rounded-2xl bg-surface/50 backdrop-blur-xl border border-border-dim/50 flex items-center gap-3.5 shadow-sm">
+          <div className="p-2.5 rounded-xl bg-amber-primary/10 text-amber-primary border border-amber-primary/20 shrink-0">
+            <Activity size={18} />
+          </div>
+          <div className="flex flex-col min-w-0">
+            <span className="text-[9px] uppercase font-black text-text-dim tracking-wider">Total Audit Events</span>
+            <span className="text-base font-black text-text-primary font-mono">{totalCount}</span>
+          </div>
+        </div>
+
+        <div className="p-3.5 rounded-2xl bg-surface/50 backdrop-blur-xl border border-border-dim/50 flex items-center gap-3.5 shadow-sm">
+          <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">
+            <ShieldCheck size={18} />
+          </div>
+          <div className="flex flex-col min-w-0">
+            <span className="text-[9px] uppercase font-black text-text-dim tracking-wider">Auth & Security</span>
+            <span className="text-base font-black text-blue-400 font-mono">{authCount}</span>
+          </div>
+        </div>
+
+        <div className="p-3.5 rounded-2xl bg-surface/50 backdrop-blur-xl border border-border-dim/50 flex items-center gap-3.5 shadow-sm">
+          <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
+            <Clock size={18} />
+          </div>
+          <div className="flex flex-col min-w-0">
+            <span className="text-[9px] uppercase font-black text-text-dim tracking-wider">CRUD Mutations</span>
+            <span className="text-base font-black text-emerald-400 font-mono">{crudCount}</span>
+          </div>
+        </div>
+
+        <div className="p-3.5 rounded-2xl bg-surface/50 backdrop-blur-xl border border-border-dim/50 flex items-center gap-3.5 shadow-sm">
+          <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20 shrink-0">
+            <UserCheck size={18} />
+          </div>
+          <div className="flex flex-col min-w-0">
+            <span className="text-[9px] uppercase font-black text-text-dim tracking-wider">Approvals & Req</span>
+            <span className="text-base font-black text-purple-400 font-mono">{approvalCount}</span>
+          </div>
         </div>
       </div>
 
+      {/* Category Pills & View Controls Toolbar */}
+      <div className="p-3 rounded-2xl bg-surface/60 backdrop-blur-xl border border-border-dim/50 flex flex-wrap items-center justify-between gap-3 shadow-md">
+        {/* Category Pills */}
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 max-w-full">
+          {actionCategories.map((cat) => {
+            const isSelected = filter === cat.value;
+            const count =
+              cat.value === "ALL"
+                ? logsToProcess.length
+                : logsToProcess.filter((l) => cat.actions?.includes(l.action)).length;
+
+            return (
+              <button
+                key={cat.value}
+                onClick={() => {
+                  setFilter(cat.value);
+                  setCurrentPage(1);
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+                  isSelected
+                    ? "bg-amber-primary text-black font-extrabold shadow-sm"
+                    : "bg-black/40 hover:bg-black/70 border border-white/10 text-text-secondary hover:text-white"
+                }`}
+              >
+                <span>{cat.label}</span>
+                <span
+                  className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${
+                    isSelected ? "bg-black/20 text-black font-black" : "bg-white/10 text-text-dim"
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Rows per page */}
+          <div className="flex items-center gap-1 bg-black/40 border border-white/10 rounded-xl px-2 py-1 text-xs text-text-dim">
+            <span className="text-[10px] font-bold uppercase tracking-wider">Show:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+              className="bg-transparent text-amber-500 font-bold focus:outline-none cursor-pointer"
+            >
+              <option value={10} className="bg-black text-white">10</option>
+              <option value={20} className="bg-black text-white">20</option>
+              <option value={50} className="bg-black text-white">50</option>
+            </select>
+          </div>
+
+          {/* View Toggle */}
+          <div className="flex items-center p-0.5 rounded-xl bg-black/40 border border-white/10 text-text-dim">
+            <button
+              onClick={() => setViewMode("table")}
+              className={`p-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                viewMode === "table"
+                  ? "bg-amber-primary text-black font-extrabold shadow"
+                  : "hover:text-white"
+              }`}
+              title="Table View (Press 'T')"
+            >
+              <List size={13} />
+              <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-black/20 opacity-70">T</span>
+            </button>
+            <button
+              onClick={() => setViewMode("grid")}
+              className={`p-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                viewMode === "grid"
+                  ? "bg-amber-primary text-black font-extrabold shadow"
+                  : "hover:text-white"
+              }`}
+              title="Cards View (Press 'G')"
+            >
+              <LayoutGrid size={13} />
+              <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-black/20 opacity-70">G</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Logs Table or Grid Container */}
+      <div className="bg-surface/50 backdrop-blur-xl border border-border-dim/50 rounded-2xl overflow-hidden shadow-2xl relative">
+        <div className="absolute -top-32 -right-32 w-96 h-96 bg-amber-primary/5 rounded-full blur-[120px] pointer-events-none" />
+
+        {paginatedLogs.length === 0 ? (
+          <div className="p-12 text-center flex flex-col items-center justify-center gap-3">
+            <div className="w-14 h-14 bg-surface-2 rounded-full flex items-center justify-center text-text-dim/40 border border-border-dim/50">
+              <Search size={24} />
+            </div>
+            <div className="space-y-1">
+              <h4 className="text-xs font-extrabold text-text-primary uppercase tracking-widest">
+                No matching logs
+              </h4>
+              <p className="text-[11px] text-text-dim max-w-xs mx-auto">
+                No activity logs match your active search filters or date range.
+              </p>
+            </div>
+          </div>
+        ) : viewMode === "table" ? (
+          <div className="overflow-x-auto no-scrollbar">
+            <table className="w-full text-left border-separate border-spacing-0 min-w-[750px]">
+              <thead>
+                <tr className="bg-surface-2/60 backdrop-blur-md">
+                  <th
+                    className="px-4 py-2.5 text-[9px] text-text-dim uppercase tracking-[0.25em] font-black border-b border-border-dim/50 cursor-pointer hover:text-text-primary transition-colors"
+                    onClick={() => toggleSort("timestamp")}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Timestamp</span>
+                      {sortBy === "timestamp" && (
+                        sortOrder === "asc" ? <ChevronUp size={12} className="text-amber-primary" /> : <ChevronDown size={12} className="text-amber-primary" />
+                      )}
+                    </div>
+                  </th>
+
+                  <th
+                    className="px-4 py-2.5 text-[9px] text-text-dim uppercase tracking-[0.25em] font-black border-b border-border-dim/50 cursor-pointer hover:text-text-primary transition-colors"
+                    onClick={() => toggleSort("user")}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>User</span>
+                      {sortBy === "user" && (
+                        sortOrder === "asc" ? <ChevronUp size={12} className="text-amber-primary" /> : <ChevronDown size={12} className="text-amber-primary" />
+                      )}
+                    </div>
+                  </th>
+
+                  <th
+                    className="px-4 py-2.5 text-[9px] text-text-dim uppercase tracking-[0.25em] font-black border-b border-border-dim/50 cursor-pointer hover:text-text-primary transition-colors"
+                    onClick={() => toggleSort("action")}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Action / Type</span>
+                      {sortBy === "action" && (
+                        sortOrder === "asc" ? <ChevronUp size={12} className="text-amber-primary" /> : <ChevronDown size={12} className="text-amber-primary" />
+                      )}
+                    </div>
+                  </th>
+
+                  <th className="px-4 py-2.5 text-[9px] text-text-dim uppercase tracking-[0.25em] font-black border-b border-border-dim/50">
+                    Summary Details
+                  </th>
+
+                  <th className="px-4 py-2.5 text-[9px] text-text-dim uppercase tracking-[0.25em] font-black text-right border-b border-border-dim/50 pr-5">
+                    Inspect
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-border-dim/10">
+                {paginatedLogs.map((log) => {
+                  const crudInfo = getCrudInfo(log.action);
+                  const isNegative =
+                    log.action?.includes("DELETE") ||
+                    log.action?.includes("REJECT") ||
+                    log.action?.includes("FAILED");
+                  const isPositive =
+                    log.action?.includes("ADD") ||
+                    log.action?.includes("APPROVE") ||
+                    log.action?.includes("SIGNUP") ||
+                    log.action?.includes("CREATE");
+                  const isModify =
+                    log.action?.includes("EDIT") || log.action?.includes("UPDATE");
+
+                  return (
+                    <tr
+                      key={log.id}
+                      onClick={() => setSelectedLog(log)}
+                      className="group transition-all duration-300 hover:bg-white/[0.03] cursor-pointer"
+                    >
+                      <td className="px-4 py-2.5 border-b border-border-dim/10 group-last:border-none font-mono">
+                        <div className="flex flex-col">
+                          <span className="text-xs font-bold text-text-primary">
+                            {new Date(log.timestamp).toLocaleDateString()}
+                          </span>
+                          <span className="text-[10px] text-text-dim">
+                            {new Date(log.timestamp).toLocaleTimeString()}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-2.5 border-b border-border-dim/10 group-last:border-none">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-amber-primary/15 border border-amber-primary/30 flex items-center justify-center text-[10px] font-extrabold text-amber-primary shrink-0">
+                            {(log.user || "?").charAt(0).toUpperCase()}
+                          </div>
+                          <span className="text-xs font-bold text-text-primary group-hover:text-amber-primary transition-colors truncate max-w-[140px]">
+                            {log.user || "System"}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-2.5 border-b border-border-dim/10 group-last:border-none">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider border ${
+                            isNegative
+                              ? "bg-red-500/10 text-red-400 border-red-500/30"
+                              : isPositive
+                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                              : isModify
+                              ? "bg-blue-500/10 text-blue-400 border-blue-500/30"
+                              : "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                          }`}
+                        >
+                          <span>{log.action?.replace(/_/g, " ")}</span>
+                        </span>
+                      </td>
+
+                      <td className="px-4 py-2.5 border-b border-border-dim/10 group-last:border-none text-xs text-text-secondary max-w-[280px]">
+                        <p className="truncate text-text-secondary group-hover:text-text-primary transition-colors">
+                          {log.summary}
+                        </p>
+                      </td>
+
+                      <td className="px-4 py-2.5 border-b border-border-dim/10 group-last:border-none text-right pr-4">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedLog(log);
+                          }}
+                          className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-primary bg-amber-primary/10 hover:bg-amber-primary/20 rounded-lg border border-amber-primary/30 transition-all cursor-pointer"
+                        >
+                          Inspect
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          /* Cards Grid View */
+          <div className="p-3 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {paginatedLogs.map((log) => {
+              const isNegative =
+                log.action?.includes("DELETE") ||
+                log.action?.includes("REJECT") ||
+                log.action?.includes("FAILED");
+              const isPositive =
+                log.action?.includes("ADD") ||
+                log.action?.includes("APPROVE") ||
+                log.action?.includes("SIGNUP") ||
+                log.action?.includes("CREATE");
+
+              return (
+                <div
+                  key={log.id}
+                  onClick={() => setSelectedLog(log)}
+                  className="p-3.5 rounded-xl bg-black/40 border border-white/10 flex flex-col justify-between gap-3 hover:border-amber-primary/30 transition-all group cursor-pointer"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider border ${
+                          isNegative
+                            ? "bg-red-500/10 text-red-400 border-red-500/30"
+                            : isPositive
+                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                            : "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                        }`}
+                      >
+                        {log.action?.replace(/_/g, " ")}
+                      </span>
+                      <span className="text-[10px] font-mono text-text-dim">
+                        {new Date(log.timestamp).toLocaleTimeString()}
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-text-primary font-medium line-clamp-2 leading-relaxed">
+                      {log.summary}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-white/5 text-xs text-text-dim">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-5 h-5 rounded-full bg-amber-primary/10 flex items-center justify-center text-[9px] font-bold text-amber-primary">
+                        {(log.user || "?").charAt(0).toUpperCase()}
+                      </div>
+                      <span className="font-semibold text-text-secondary truncate max-w-[100px]">
+                        {log.user}
+                      </span>
+                    </div>
+
+                    <span className="text-[10px] font-mono text-text-dim">
+                      {new Date(log.timestamp).toLocaleDateString()}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Pagination Footer */}
+        {sortedLogs.length > 0 && (
+          <div className="p-3 border-t border-border-dim/40 bg-surface-2/40 backdrop-blur-md flex flex-wrap items-center justify-between gap-3 text-xs text-text-dim">
+            <div>
+              Showing <span className="font-bold text-text-primary">{startIndex + 1}</span> to{" "}
+              <span className="font-bold text-text-primary">
+                {Math.min(startIndex + pageSize, sortedLogs.length)}
+              </span>{" "}
+              of <span className="font-bold text-amber-primary">{sortedLogs.length}</span> records
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                disabled={safePage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                className="px-2.5 py-1 rounded-lg bg-black/40 border border-white/10 hover:border-white/20 disabled:opacity-30 text-text-primary font-bold transition-all cursor-pointer"
+              >
+                Prev
+              </button>
+              <span className="px-2 font-mono text-xs font-bold text-amber-500">
+                Page {safePage} of {totalPages}
+              </span>
+              <button
+                disabled={safePage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                className="px-2.5 py-1 rounded-lg bg-black/40 border border-white/10 hover:border-white/20 disabled:opacity-30 text-text-primary font-bold transition-all cursor-pointer"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Log Details Inspector Modal */}
       <AnimatePresence>
         {selectedLog && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -4274,120 +5616,133 @@ const LogsView = ({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setSelectedLog(null)}
-              className="absolute inset-0 bg-black/60 "
+              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
             />
             <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              initial={{ opacity: 0, scale: 0.94, y: 12 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative w-full max-w-lg bg-surface border border-border-bright rounded-2xl shadow-2xl overflow-hidden"
+              exit={{ opacity: 0, scale: 0.94, y: 12 }}
+              className="relative w-full max-w-xl bg-surface/95 backdrop-blur-2xl border border-border-bright rounded-2xl shadow-2xl overflow-hidden z-10"
             >
-              <div className="p-6 border-b border-border-dim flex items-center justify-between bg-surface-2">
+              <div className="p-5 border-b border-border-dim/50 flex items-center justify-between bg-surface-2/60">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-amber-primary/10 rounded-lg text-amber-primary">
+                  <div className="p-2 bg-amber-primary/15 border border-amber-primary/30 rounded-xl text-amber-primary">
                     <Activity size={20} />
                   </div>
                   <div>
-                    <h3 className="text-lg font-bold text-text-primary">
-                      Log Details
+                    <h3 className="text-base font-bold text-text-primary">
+                      Audit Log Details
                     </h3>
-                    <p className="text-[10px] text-text-dim uppercase tracking-widest font-bold">
-                      ID: {selectedLog.id}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-text-dim font-mono">
+                        LOG ID: {selectedLog.id}
+                      </span>
+                      <button
+                        onClick={() => copyToClipboard(selectedLog.id, "id")}
+                        className="text-[9px] text-amber-primary hover:underline font-bold uppercase"
+                      >
+                        {copiedId === "id" ? "Copied!" : "Copy ID"}
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <button
                   onClick={() => setSelectedLog(null)}
-                  className="p-2 hover:bg-surface rounded-full transition-colors text-text-dim hover:text-text-primary"
+                  className="p-1.5 hover:bg-white/10 rounded-xl transition-colors text-text-dim hover:text-text-primary cursor-pointer"
                 >
-                  <X size={20} />
+                  <X size={18} />
                 </button>
               </div>
 
-              <div className="p-6 space-y-6">
-                <div className="grid grid-cols-2 gap-6">
-                  <div className="space-y-1">
-                    <p className="text-[10px] text-text-dim uppercase tracking-widest font-black">
+              <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto no-scrollbar">
+                {/* Meta Grid */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 bg-black/40 border border-white/10 rounded-xl space-y-1">
+                    <span className="text-[9px] text-text-dim uppercase tracking-wider font-extrabold">
                       Timestamp
-                    </p>
-                    <p className="text-sm font-mono text-text-primary">
+                    </span>
+                    <p className="text-xs font-mono font-bold text-text-primary">
                       {new Date(selectedLog.timestamp).toLocaleString()}
                     </p>
                   </div>
 
-                  <div className="p-4 bg-surface-2 border border-border-dim rounded-xl space-y-2">
-                    <p className="text-[10px] text-text-dim uppercase tracking-widest font-black">
-                      CRUD Operations Context
-                    </p>
-                    <div className="flex items-start gap-3">
-                      <span
-                        className={`text-[9px] px-2 py-0.5 rounded font-black border uppercase tracking-wider inline-block mt-0.5 ${getCrudInfo(selectedLog.action).badgeColor}`}
-                      >
-                        ${getCrudInfo(selectedLog.action).type}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <h5 className="text-xs font-bold text-text-primary uppercase tracking-wide">
-                          ${getCrudInfo(selectedLog.action).title}
-                        </h5>
-                        <p className="text-[11px] text-text-secondary leading-relaxed mt-1 font-sans">
-                          ${getCrudInfo(selectedLog.action).description}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] text-text-dim uppercase tracking-widest font-black">
-                      User
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-amber-primary/10 flex items-center justify-center text-[10px] font-bold text-amber-primary">
-                        {selectedLog.user.charAt(0).toUpperCase()}
-                      </div>
-                      <p className="text-sm font-bold text-text-primary">
-                        {selectedLog.user}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] text-text-dim uppercase tracking-widest font-black">
-                      Action Triggered
-                    </p>
-                    <span
-                      className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-widest ${
-                        selectedLog.action?.includes("DELETE") ||
-                        selectedLog.action?.includes("REJECT") ||
-                        selectedLog.action?.includes("FAILED")
-                          ? "bg-red-500/10 text-red-500"
-                          : selectedLog.action?.includes("ADD") ||
-                              selectedLog.action?.includes("APPROVE") ||
-                              selectedLog.action?.includes("SIGNUP") ||
-                              selectedLog.action?.includes("CREATE")
-                            ? "bg-green-500/10 text-green-500"
-                            : selectedLog.action?.includes("EDIT") ||
-                                selectedLog.action?.includes("UPDATE")
-                              ? "bg-blue-500/10 text-blue-500"
-                              : "bg-amber-500/10 text-amber-500"
-                      }`}
-                    >
-                      ${selectedLog.action?.replace(/_/g, " ")}
+                  <div className="p-3 bg-black/40 border border-white/10 rounded-xl space-y-1">
+                    <span className="text-[9px] text-text-dim uppercase tracking-wider font-extrabold">
+                      Actor / User
                     </span>
+                    <div className="flex items-center gap-2">
+                      <div className="w-5 h-5 rounded-full bg-amber-primary/20 text-amber-primary flex items-center justify-center text-[10px] font-extrabold">
+                        {(selectedLog.user || "?").charAt(0).toUpperCase()}
+                      </div>
+                      <span className="text-xs font-bold text-text-primary truncate">
+                        {selectedLog.user}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <p className="text-[10px] text-text-dim uppercase tracking-widest font-black">
-                    Summary
-                  </p>
-                  <div className="p-4 bg-surface-2 border border-border-dim rounded-xl text-sm text-text-secondary leading-relaxed">
+                {/* CRUD Operation Info Box */}
+                {(() => {
+                  const info = getCrudInfo(selectedLog.action);
+                  return (
+                    <div className="p-3.5 bg-black/40 border border-white/10 rounded-xl space-y-2">
+                      <span className="text-[9px] text-text-dim uppercase tracking-wider font-extrabold">
+                        Operation Context
+                      </span>
+                      <div className="flex items-start gap-3">
+                        <span className={`text-[9px] px-2 py-0.5 rounded font-black border uppercase tracking-wider ${info.badgeColor}`}>
+                          {info.type}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <h5 className="text-xs font-bold text-text-primary">
+                            {info.title}
+                          </h5>
+                          <p className="text-[11px] text-text-secondary leading-relaxed mt-0.5">
+                            {info.description}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Event Action & Category */}
+                <div className="p-3 bg-black/40 border border-white/10 rounded-xl flex items-center justify-between">
+                  <span className="text-[9px] text-text-dim uppercase tracking-wider font-extrabold">
+                    Triggered Action Tag
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md bg-amber-primary/15 border border-amber-primary/30 text-amber-primary text-xs font-mono font-bold">
+                    {selectedLog.action}
+                  </span>
+                </div>
+
+                {/* Log Summary */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] text-text-dim uppercase tracking-wider font-extrabold">
+                      Full Log Summary
+                    </span>
+                    <button
+                      onClick={() => copyToClipboard(selectedLog.summary, "summary")}
+                      className="text-[9px] text-amber-primary hover:underline font-bold uppercase"
+                    >
+                      {copiedId === "summary" ? "Copied!" : "Copy Summary"}
+                    </button>
+                  </div>
+                  <div className="p-3.5 bg-black/60 border border-white/10 rounded-xl text-xs text-text-primary leading-relaxed font-mono whitespace-pre-wrap">
                     {selectedLog.summary}
                   </div>
                 </div>
               </div>
 
-              <div className="p-6 bg-surface-2 border-t border-border-dim flex justify-end">
+              <div className="p-4 bg-surface-2/60 border-t border-border-dim/50 flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-[10px] text-emerald-400 font-mono">
+                  <ShieldCheck size={13} />
+                  <span>Verified Audit Record</span>
+                </div>
                 <button
                   onClick={() => setSelectedLog(null)}
-                  className="px-6 py-2 bg-amber-primary text-bg rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-amber-secondary transition-all"
+                  className="px-5 py-1.5 bg-amber-primary text-black rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-amber-400 transition-all cursor-pointer"
                 >
                   Close
                 </button>
@@ -5023,8 +6378,193 @@ const SettingsModal = ({
   onProfileClick,
   playSound,
   initialTab = "account",
+  request,
+  showToast,
+  assignedRegion,
+  setAssignedRegion,
 }: any) => {
   const [activeTab, setActiveTab] = useState("account");
+
+  const [smtpConfig, setSmtpConfig] = useState({
+    host: "",
+    port: "587",
+    user: "",
+    pass: "",
+    from: ""
+  });
+  const [loadingSmtp, setLoadingSmtp] = useState(false);
+  const [testingSmtp, setTestingSmtp] = useState(false);
+  const [testEmail, setTestEmail] = useState("");
+
+  const [showSmtpPass, setShowSmtpPass] = useState(false);
+  const [smtpProviderPreset, setSmtpProviderPreset] = useState<string>("custom");
+
+  const applySmtpPreset = (preset: string) => {
+    setSmtpProviderPreset(preset);
+    if (preset === "gmail") {
+      setSmtpConfig(prev => ({
+        ...prev,
+        host: "smtp.gmail.com",
+        port: "587",
+        from: prev.from || (prev.user ? `"pySync Notifications" <${prev.user}>` : '"pySync Notifications" <noreply@gmail.com>')
+      }));
+    } else if (preset === "office365") {
+      setSmtpConfig(prev => ({
+        ...prev,
+        host: "smtp.office365.com",
+        port: "587",
+        from: prev.from || (prev.user ? `"pySync Notifications" <${prev.user}>` : '"pySync Notifications" <noreply@office365.com>')
+      }));
+    } else if (preset === "sendgrid") {
+      setSmtpConfig(prev => ({
+        ...prev,
+        host: "smtp.sendgrid.net",
+        port: "587",
+        user: prev.user || "apikey"
+      }));
+    } else if (preset === "ses") {
+      setSmtpConfig(prev => ({
+        ...prev,
+        host: "email-smtp.us-east-1.amazonaws.com",
+        port: "587"
+      }));
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen && activeTab === "smtp" && request) {
+      setLoadingSmtp(true);
+      request("/api/smtp/config")
+        .then((data: any) => {
+          if (data) {
+            setSmtpConfig({
+              host: data.host || "",
+              port: data.port || "587",
+              user: data.user || "",
+              pass: data.pass || "",
+              from: data.from || ""
+            });
+            if (data.host?.includes("gmail")) setSmtpProviderPreset("gmail");
+            else if (data.host?.includes("office365") || data.host?.includes("outlook")) setSmtpProviderPreset("office365");
+            else if (data.host?.includes("sendgrid")) setSmtpProviderPreset("sendgrid");
+            else if (data.host?.includes("amazonaws")) setSmtpProviderPreset("ses");
+            else if (data.host) setSmtpProviderPreset("custom");
+          }
+        })
+        .catch((err: any) => {
+          console.error("Failed to load SMTP config:", err);
+          if (showToast) showToast("Failed to load SMTP configuration.", "error");
+        })
+        .finally(() => {
+          setLoadingSmtp(false);
+        });
+    }
+  }, [isOpen, activeTab, request]);
+
+  const handleSaveSmtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!request) return;
+    setLoadingSmtp(true);
+    try {
+      const res = await request("/api/smtp/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(smtpConfig)
+      });
+      if (res && res.success) {
+        if (showToast) showToast(res.message || "SMTP configuration saved.", "success");
+      }
+    } catch (err: any) {
+      console.error("Failed to save SMTP config:", err);
+      if (showToast) showToast(err.message || "Failed to save SMTP configuration.", "error");
+    } finally {
+      setLoadingSmtp(false);
+    }
+  };
+
+  const handleTestSmtp = async () => {
+    const targetEmail = testEmail || user?.email;
+    if (!targetEmail) {
+      if (showToast) showToast("Please enter a test recipient email address.", "error");
+      return;
+    }
+    if (!request) return;
+    setTestingSmtp(true);
+    try {
+      const res = await request("/api/smtp/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: targetEmail })
+      });
+      if (res && res.success) {
+        if (showToast) showToast(res.message || "Test email sent successfully!", "success");
+      }
+    } catch (err: any) {
+      console.error("Failed SMTP test:", err);
+      if (showToast) showToast(err.message || "SMTP connection test failed.", "error");
+    } finally {
+      setTestingSmtp(false);
+    }
+  };
+
+  const [stackDomain, setStackDomain] = useState("pysync.yourdomain.com");
+  const [stackEmail, setStackEmail] = useState("admin@yourdomain.com");
+  const [stackPort, setStackPort] = useState(3000);
+  const [stackInstances, setStackInstances] = useState("max");
+  const [loadingStack, setLoadingStack] = useState(false);
+  const [savingStack, setSavingStack] = useState(false);
+  const [activeCodeTab, setActiveCodeTab] = useState<"ecosystem" | "nginx" | "deploy">("deploy");
+  const [generatedFiles, setGeneratedFiles] = useState<any>(null);
+
+  useEffect(() => {
+    if (isOpen && activeTab === "stack" && request) {
+      setLoadingStack(true);
+      request("/api/stack/config")
+        .then((data: any) => {
+          if (data) {
+            setStackDomain(data.domain || "pysync.yourdomain.com");
+            setStackEmail(data.email || "admin@yourdomain.com");
+            setStackPort(data.port || 3000);
+            setStackInstances(data.instances || "max");
+          }
+        })
+        .catch((err: any) => {
+          console.error("Failed to load stack config:", err);
+        })
+        .finally(() => {
+          setLoadingStack(false);
+        });
+    }
+  }, [isOpen, activeTab, request]);
+
+  const handleSaveStack = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!request) return;
+    setSavingStack(true);
+    try {
+      const res = await request("/api/stack/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          domain: stackDomain,
+          email: stackEmail,
+          port: Number(stackPort),
+          instances: stackInstances
+        })
+      });
+      if (res && res.success) {
+        if (showToast) showToast(res.message || "Stack configuration saved and files generated.", "success");
+        if (res.files) {
+          setGeneratedFiles(res.files);
+        }
+      }
+    } catch (err: any) {
+      console.error("Failed to save stack config:", err);
+      if (showToast) showToast(err.message || "Failed to save stack configuration.", "error");
+    } finally {
+      setSavingStack(false);
+    }
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -5044,6 +6584,9 @@ const SettingsModal = ({
       language: "Language",
       accent: "Accent Color",
       theme: "Theme",
+      light: "Light",
+      dark: "Dark",
+      systemDefault: "System Default",
       font: "Font Style",
       fontSize: "Font Size",
       motion: "Reduced Motion",
@@ -5055,6 +6598,9 @@ const SettingsModal = ({
       language: "Idioma",
       accent: "Color de Acento",
       theme: "Tema",
+      light: "Claro",
+      dark: "Oscuro",
+      systemDefault: "Predeterminado del Sistema",
       font: "Estilo de Fuente",
       fontSize: "Tamaño de Fuente",
       motion: "Movimiento Reducido",
@@ -5066,9 +6612,40 @@ const SettingsModal = ({
       language: "भाषा",
       accent: "एक्सेन्ट रंग",
       theme: "थीम",
+      light: "लाइट",
+      dark: "डार्क",
+      systemDefault: "सिस्टम डिफ़ॉल्ट",
       font: "फ़ॉन्ट शैली",
       fontSize: "फ़ॉन्ट आकार",
       motion: "कम गति",
+    },
+    French: {
+      settings: "Paramètres",
+      preferences: "Préférences",
+      appearance: "Apparence",
+      language: "Langue",
+      accent: "Couleur d'Accent",
+      theme: "Thème",
+      light: "Clair",
+      dark: "Sombre",
+      systemDefault: "Système par Défaut",
+      font: "Style de Police",
+      fontSize: "Taille de Police",
+      motion: "Mouvement Réduit",
+    },
+    German: {
+      settings: "Einstellungen",
+      preferences: "Präferenzen",
+      appearance: "Erscheinungsbild",
+      language: "Sprache",
+      accent: "Akzentfarbe",
+      theme: "Design",
+      light: "Hell",
+      dark: "Dunkel",
+      systemDefault: "Systemstandard",
+      font: "Schriftstil",
+      fontSize: "Schriftgröße",
+      motion: "Reduzierte Bewegung",
     },
   };
 
@@ -5090,12 +6667,285 @@ const SettingsModal = ({
   };
 
   const tabs = [
-    { id: "account", label: "Account", icon: User },
-    { id: "preferences", label: "Preferences", icon: Settings },
-    { id: "appearance", label: "Appearance", icon: Palette },
-    { id: "help", label: "Help", icon: HelpCircle },
-    { id: "system", label: "System & About", icon: Info },
+    { id: "account", label: "Account", mobileLabel: "Account", icon: User },
+    { id: "preferences", label: "Preferences", mobileLabel: "Prefs", icon: Settings },
+    { id: "appearance", label: "Appearance", mobileLabel: "Style", icon: Palette },
+    ...(user?.role === "admin" || user?.permissions?.includes("MANAGE_USERS") ? [
+      { id: "smtp", label: "Email & SMTP", mobileLabel: "SMTP", icon: Mail },
+      { id: "stack", label: "Stack Manager", mobileLabel: "Stack", icon: Server },
+    ] : []),
+    { id: "help", label: "Help", mobileLabel: "Help", icon: HelpCircle },
+    { id: "system", label: "System & About", mobileLabel: "System", icon: Info },
   ];
+
+  const getLiveCode = () => {
+    if (activeCodeTab === "ecosystem") {
+      return `/**
+ * PM2 Process Manager Configuration for pySync CRM
+ * Generated automatically by PySync Stack Manager
+ */
+module.exports = {
+  apps: [
+    {
+      name: 'pysync-crm',
+      script: './dist/server.cjs',
+      instances: '${stackInstances}',
+      exec_mode: 'cluster',
+      env: {
+        NODE_ENV: 'production',
+        PORT: ${stackPort}
+      },
+      env_file: '.env',
+      max_memory_restart: '1G',
+      autorestart: true,
+      watch: false,
+      merge_logs: true,
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z'
+    }
+  ]
+};`;
+    } else if (activeCodeTab === "nginx") {
+      return `# Nginx Server Block Virtual Host configuration for pySync CRM
+# Generated automatically by PySync Stack Manager
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${stackDomain};
+
+    # Redirect all HTTP traffic to secure HTTPS
+    location / {
+        return 301 https://$host$request_uri;
+    }
+
+    # Certbot ACME challenge validation path
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${stackDomain};
+
+    # SSL Certificates managed by Certbot Let's Encrypt
+    ssl_certificate /etc/letsencrypt/live/${stackDomain}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${stackDomain}/privkey.pem;
+
+    # Secure SSL Protocols and Ciphers
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384';
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_tickets off;
+
+    # Security Headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Gzip Compression
+    gzip on;
+    gzip_proxied any;
+    gzip_types text/plain text/css application/json application/javascript text/xml;
+    gzip_comp_level 5;
+
+    # Backend API / Reverse Proxy configuration
+    location / {
+        proxy_pass http://127.0.0.1:${stackPort};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Max body upload limits (useful for larger document transfers)
+        client_max_body_size 500M;
+    }
+
+    # Static Assets Long-term Caching
+    location /assets/ {
+        proxy_pass http://127.0.0.1:${stackPort};
+        expires 30d;
+        add_header Cache-Control "public, no-transform";
+    }
+}`;
+    } else {
+      return `#!/bin/bash
+# pySync CRM Automated Deployment Script (Ubuntu/Debian)
+# NGINX + PM2 + Certbot Stack Setup
+# Generated automatically by PySync Stack Manager
+
+# Exit on any error
+set -e
+
+DOMAIN="${stackDomain}"
+EMAIL="${stackEmail}"
+PORT="${stackPort}"
+
+echo "================================================="
+echo "🚀 Starting pySync CRM Stack Deployment on Host"
+echo "Target Domain: \$DOMAIN"
+echo "Internal Port: \$PORT"
+echo "Alert SSL Email: \$EMAIL"
+echo "================================================="
+
+# 1. Update Package repositories
+echo "Updating apt packages..."
+sudo apt update -y
+
+# 2. Install curl and git if missing
+sudo apt install -y curl git gnupg
+
+# 3. Install Node.js (v20 LTS)
+if ! command -v node &> /dev/null; then
+    echo "Installing Node.js v20..."
+    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+    sudo apt install -y nodejs
+else
+    echo "Node.js already installed: \$(node -v)"
+fi
+
+# 4. Install PM2 globally
+if ! command -v pm2 &> /dev/null; then
+    echo "Installing PM2 globally..."
+    sudo npm install -y pm2 -g
+else
+    echo "PM2 already installed: \$(pm2 -v)"
+fi
+
+# 5. Install NGINX
+if ! command -v nginx &> /dev/null; then
+    echo "Installing NGINX..."
+    sudo apt install -y nginx
+else
+    echo "NGINX already installed."
+fi
+
+# 6. Install Certbot
+if ! command -v certbot &> /dev/null; then
+    echo "Installing Certbot..."
+    sudo apt install -y certbot python3-certbot-nginx
+else
+    echo "Certbot already installed."
+fi
+
+# 7. Configure Temporary HTTP Server block for ACME challenge
+echo "Creating HTTP Nginx configuration..."
+sudo tee /etc/nginx/sites-available/pysync.conf > /dev/null <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name \$DOMAIN;
+
+    location / {
+        proxy_pass http://127.0.0.1:\$PORT;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+    }
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+}
+EOF
+
+# Link configuration
+sudo ln -sf /etc/nginx/sites-available/pysync.conf /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+
+# Test & reload
+sudo nginx -t
+sudo systemctl reload nginx
+
+# 8. Request SSL Certificate
+echo "Requesting SSL certificates..."
+sudo certbot --nginx --non-interactive --agree-tos --email "\${EMAIL}" -d "\${DOMAIN}" --redirect
+
+# 9. Overwrite with full production secure SSL server block
+echo "Applying final secure HTTPS configuration..."
+sudo tee /etc/nginx/sites-available/pysync.conf > /dev/null <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name \$DOMAIN;
+    return 301 https://\$host\$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name \$DOMAIN;
+
+    ssl_certificate /etc/letsencrypt/live/\$DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/\$DOMAIN/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384';
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_tickets off;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml;
+
+    location / {
+        proxy_pass http://127.0.0.1:\$PORT;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        client_max_body_size 500M;
+    }
+}
+EOF
+
+# Test & reload final configuration
+sudo nginx -t
+sudo systemctl reload nginx
+
+# 10. Install production dependencies and boot up PM2
+echo "Installing production dependencies..."
+npm install --omit=dev --legacy-peer-deps || npm install --legacy-peer-deps
+
+echo "Building production bundles..."
+npm run build
+
+echo "Starting/Reloading process with PM2..."
+if pm2 show pysync-crm &> /dev/null; then
+    pm2 reload ecosystem.config.cjs
+else
+    pm2 start ecosystem.config.cjs
+fi
+
+sudo env PATH=\$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u \$USER --hp \$HOME
+pm2 save
+
+echo "================================================="
+echo "🎉 pySync CRM stack deployment complete!"
+echo "Check your site at: https://$DOMAIN"
+echo "================================================="`;
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 sm:p-4 md:p-6 bg-black/60 ">
@@ -5103,16 +6953,16 @@ const SettingsModal = ({
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
-        className="bg-surface border border-border-dim rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col md:flex-row h-[85vh] max-h-[800px]"
+        className="bg-surface border border-border-dim rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col md:flex-row h-[90vh] md:h-[85vh] max-h-[800px]"
       >
         {/* Sidebar */}
         <div className="w-full md:w-64 bg-surface-2 border-b md:border-b-0 md:border-r border-border-dim flex flex-col shrink-0">
-          <div className="p-6 border-b border-border-dim flex items-center justify-between">
+          <div className="p-4 sm:p-6 border-b border-border-dim flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-amber-primary/10 rounded-lg">
                 <Settings className="text-amber-primary" size={20} />
               </div>
-              <h2 className="text-lg font-bold text-text-primary">
+              <h2 className="text-base sm:text-lg font-bold text-text-primary">
                 {t("settings")}
               </h2>
             </div>
@@ -5123,24 +6973,30 @@ const SettingsModal = ({
               <X size={20} />
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-1 flex flex-row md:flex-col gap-2 md:gap-0 overflow-x-auto custom-scrollbar">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => {
-                  setActiveTab(tab.id);
-                  playSound("click");
-                }}
-                className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all whitespace-nowrap ${
-                  activeTab === tab.id
-                    ? "bg-amber-primary/10 text-amber-primary"
-                    : "text-text-secondary hover:bg-surface-3 hover:text-text-primary"
-                }`}
-              >
-                <tab.icon size={18} />
-                {tab.label}
-              </button>
-            ))}
+          <div className="p-2 md:p-4 bg-surface-2 md:bg-transparent">
+            <div className="grid grid-cols-5 md:flex md:flex-col gap-1 md:gap-1 p-1 md:p-0 bg-surface-3/50 md:bg-transparent rounded-xl border border-border-dim/50 md:border-none">
+              {tabs.map((tab) => {
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      setActiveTab(tab.id);
+                      playSound("click");
+                    }}
+                    className={`flex flex-col md:flex-row items-center justify-center md:justify-start gap-1 md:gap-3 px-1 py-2 md:px-4 md:py-3 rounded-lg md:rounded-xl text-[10px] sm:text-xs md:text-sm font-medium transition-all text-center md:text-left ${
+                      isActive
+                        ? "bg-amber-primary text-black font-bold shadow-sm shadow-amber-primary/30 md:bg-amber-primary/10 md:text-amber-primary md:border md:border-amber-primary/30"
+                        : "text-text-secondary hover:bg-surface-3 hover:text-text-primary"
+                    }`}
+                  >
+                    <tab.icon size={16} className={`shrink-0 ${isActive ? "text-black md:text-amber-primary" : "text-text-dim"}`} />
+                    <span className="hidden md:inline">{tab.label}</span>
+                    <span className="inline md:hidden text-[10px] leading-tight font-semibold tracking-tight">{tab.mobileLabel || tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
@@ -5155,7 +7011,7 @@ const SettingsModal = ({
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-6 md:p-10 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-10 custom-scrollbar">
             <div className="max-w-2xl mx-auto space-y-8">
               {activeTab === "account" && (
                 <motion.div
@@ -5208,6 +7064,49 @@ const SettingsModal = ({
                       Edit Profile
                     </button>
                   </div>
+
+                  {/* Team Settings / Assigned Region Setting */}
+                  <div className="space-y-4">
+                    <div>
+                      <h4 className="text-sm font-bold text-text-primary uppercase tracking-[0.2em] mb-1">
+                        Team Settings
+                      </h4>
+                      <p className="text-xs text-text-dim">
+                        Configure regional bounds and zone operations for your desk.
+                      </p>
+                    </div>
+
+                    <div className="p-6 bg-surface-2 rounded-2xl border border-border-bright hover:border-amber-primary/40 transition-all space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div className="space-y-1">
+                          <p className="text-sm font-bold text-text-primary">
+                            Current Assigned Region
+                          </p>
+                          <p className="text-xs text-text-dim">
+                            Warnings will trigger if resale properties are listed outside this region.
+                          </p>
+                        </div>
+                        <div className="w-full sm:w-48">
+                          <select
+                            value={assignedRegion}
+                            onChange={(e) => {
+                              setAssignedRegion(e.target.value);
+                              showToast(`Assigned region updated to ${e.target.value}`, "success");
+                              playSound("click");
+                            }}
+                            className="w-full bg-surface-3 border border-border-bright rounded-xl px-4 py-2.5 text-xs font-bold text-text-primary focus:outline-none focus:border-amber-primary"
+                          >
+                            <option value="Gurugram">Gurugram</option>
+                            <option value="Delhi">Delhi</option>
+                            <option value="Mumbai">Mumbai</option>
+                            <option value="Noida">Noida</option>
+                            <option value="Bangalore">Bangalore</option>
+                            <option value="Pune">Pune</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </motion.div>
               )}
 
@@ -5252,6 +7151,8 @@ const SettingsModal = ({
                         </div>
                       </div>
                     </div>
+
+
 
                     <div className="p-5 bg-surface-2 rounded-2xl border border-border-dim">
                       <h4 className="text-sm font-bold text-text-primary mb-3">
@@ -5367,7 +7268,7 @@ const SettingsModal = ({
                         onClick={() =>
                           handleToggle(setCompactMode, compactMode)
                         }
-                        className={`w-12 h-6 rounded-full transition-colors relative ${compactMode ? "bg-amber-primary" : "bg-surface-3 border border-border-dim"}`}
+                        className={`w-12 h-6 rounded-full transition-colors relative shrink-0 ${compactMode ? "bg-amber-primary" : "bg-surface-3 border border-border-dim"}`}
                       >
                         <div
                           className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all shadow-sm ${compactMode ? "left-7" : "left-1"}`}
@@ -5391,7 +7292,7 @@ const SettingsModal = ({
                       </div>
                       <button
                         onClick={() => handleToggle(setAutoSave, autoSave)}
-                        className={`w-12 h-6 rounded-full transition-colors relative ${autoSave ? "bg-amber-primary" : "bg-surface-3 border border-border-dim"}`}
+                        className={`w-12 h-6 rounded-full transition-colors relative shrink-0 ${autoSave ? "bg-amber-primary" : "bg-surface-3 border border-border-dim"}`}
                       >
                         <div
                           className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all shadow-sm ${autoSave ? "left-7" : "left-1"}`}
@@ -5417,7 +7318,7 @@ const SettingsModal = ({
                         onClick={() =>
                           handleToggle(setSoundEffects, soundEffects)
                         }
-                        className={`w-12 h-6 rounded-full transition-colors relative ${soundEffects ? "bg-amber-primary" : "bg-surface-3 border border-border-dim"}`}
+                        className={`w-12 h-6 rounded-full transition-colors relative shrink-0 ${soundEffects ? "bg-amber-primary" : "bg-surface-3 border border-border-dim"}`}
                       >
                         <div
                           className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all shadow-sm ${soundEffects ? "left-7" : "left-1"}`}
@@ -5499,26 +7400,31 @@ const SettingsModal = ({
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="p-5 bg-surface-2 rounded-2xl border border-border-dim space-y-4">
                         <div className="flex items-center gap-3 mb-2">
-                          <Moon size={18} className="text-text-secondary" />
+                          <Palette size={18} className="text-text-secondary" />
                           <h4 className="text-sm font-bold text-text-primary">
                             {t("theme")}
                           </h4>
                         </div>
-                        <div className="flex gap-3">
-                          {["dark", "light"].map((tOption) => (
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            { id: "light", label: t("light"), icon: Sun },
+                            { id: "dark", label: t("dark"), icon: Moon },
+                            { id: "system", label: t("systemDefault"), icon: Monitor },
+                          ].map((tOption) => (
                             <button
-                              key={tOption}
+                              key={tOption.id}
                               onClick={(e) => {
-                                setTheme(tOption, e);
+                                setTheme(tOption.id, e);
                                 playSound("click");
                               }}
-                              className={`flex-1 px-4 py-3 rounded-xl text-xs font-bold transition-all border capitalize ${
-                                theme === tOption
+                              className={`px-2 py-3 rounded-xl text-xs font-bold transition-all border flex flex-col items-center justify-center gap-1.5 text-center ${
+                                theme === tOption.id
                                   ? "bg-amber-primary/10 border-amber-primary text-amber-primary shadow-sm"
                                   : "bg-surface border-border-dim text-text-secondary hover:border-border-bright"
                               }`}
                             >
-                              {tOption}
+                              <tOption.icon size={15} />
+                              <span className="leading-tight text-[10px] sm:text-xs">{tOption.label}</span>
                             </button>
                           ))}
                         </div>
@@ -5599,7 +7505,7 @@ const SettingsModal = ({
                         onClick={() =>
                           handleToggle(setReducedMotion, reducedMotion)
                         }
-                        className={`w-12 h-6 rounded-full transition-colors relative ${reducedMotion ? "bg-amber-primary" : "bg-surface-3 border border-border-dim"}`}
+                        className={`w-12 h-6 rounded-full transition-colors relative shrink-0 ${reducedMotion ? "bg-amber-primary" : "bg-surface-3 border border-border-dim"}`}
                       >
                         <div
                           className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all shadow-sm ${reducedMotion ? "left-7" : "left-1"}`}
@@ -5705,6 +7611,523 @@ const SettingsModal = ({
                     >
                       <Trash2 size={16} /> Reset to Defaults
                     </button>
+                  </div>
+                </motion.div>
+              )}
+
+              {activeTab === "smtp" && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="space-y-5"
+                >
+                  {/* Modern Status & Dispatch Hero Card */}
+                  <div className="relative rounded-2xl bg-gradient-to-br from-surface-2 via-surface-2 to-surface border border-border-dim p-4 sm:p-5 overflow-hidden shadow-sm">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                          smtpConfig.host && smtpConfig.user
+                            ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                            : "bg-amber-primary/10 border-amber-primary/30 text-amber-primary"
+                        }`}>
+                          <Mail size={20} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-sm font-bold text-text-primary">
+                              SMTP Relay Engine
+                            </h3>
+                            {smtpConfig.host && smtpConfig.user ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                Online & Active
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-primary/10 text-amber-primary border border-amber-primary/20">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-primary" />
+                                Setup Required
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-text-dim mt-0.5">
+                            Handles user invites, temporary passwords, reset tokens, and notifications.
+                          </p>
+                        </div>
+                      </div>
+
+                      {user?.email && (
+                        <div className="text-left sm:text-right text-[11px] text-text-dim">
+                          <span className="opacity-70">Admin Dispatcher:</span>{" "}
+                          <span className="font-mono font-medium text-text-primary">{user.email}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Mail Provider Selection Grid */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-text-dim flex items-center gap-1.5">
+                        <Server size={12} className="text-amber-primary" /> Mail Service Provider
+                      </label>
+                      <span className="text-[10px] text-text-dim">One-click port & host presets</span>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                      {[
+                        { id: "gmail", name: "Google Workspace", sub: "smtp.gmail.com", badge: "TLS 587" },
+                        { id: "office365", name: "Microsoft 365", sub: "smtp.office365.com", badge: "TLS 587" },
+                        { id: "sendgrid", name: "SendGrid", sub: "smtp.sendgrid.net", badge: "TLS 587" },
+                        { id: "ses", name: "Amazon SES", sub: "email-smtp.aws", badge: "TLS 587" },
+                        { id: "custom", name: "Custom Host", sub: "Enterprise SMTP", badge: "Custom" },
+                      ].map((prov) => (
+                        <button
+                          key={prov.id}
+                          type="button"
+                          onClick={() => applySmtpPreset(prov.id)}
+                          className={`p-2.5 rounded-xl text-left border transition-all relative flex flex-col justify-between ${
+                            smtpProviderPreset === prov.id
+                              ? "bg-amber-primary/10 border-amber-primary text-text-primary shadow-sm ring-1 ring-amber-primary/20"
+                              : "bg-surface-2 border-border-dim text-text-dim hover:text-text-primary hover:border-border-bright"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-surface border border-border-dim/60 text-text-dim">
+                              {prov.badge}
+                            </span>
+                            {smtpProviderPreset === prov.id && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-primary" />
+                            )}
+                          </div>
+                          <div>
+                            <div className="text-xs font-bold truncate">{prov.name}</div>
+                            <div className="text-[10px] text-text-dim truncate">{prov.sub}</div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Gmail App Password Alert Card */}
+                  {smtpConfig.host.includes("gmail") && (
+                    <div className="p-4 bg-gradient-to-r from-amber-primary/10 to-surface-2 border border-amber-primary/30 rounded-2xl space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-amber-primary flex items-center gap-1.5 text-xs">
+                          <Key size={14} /> Gmail Security Requirement
+                        </span>
+                        <a
+                          href="https://myaccount.google.com/apppasswords"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-primary hover:underline bg-amber-primary/10 px-2 py-0.5 rounded-lg border border-amber-primary/20"
+                        >
+                          Generate App Password <ExternalLink size={11} />
+                        </a>
+                      </div>
+                      <p className="text-[11px] text-text-dim leading-relaxed">
+                        Standard account passwords cannot be used. Enable 2-Step Verification on your Google Account, generate a 16-character <strong>App Password</strong>, and paste it into the password field below.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Connection Console Form */}
+                  <form onSubmit={handleSaveSmtp} className="p-5 bg-surface-2/80 rounded-2xl border border-border-dim space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                      {/* Host */}
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-semibold text-text-secondary">SMTP Hostname</label>
+                        <div className="relative">
+                          <Server size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim" />
+                          <input
+                            type="text"
+                            value={smtpConfig.host}
+                            onChange={(e) => setSmtpConfig({ ...smtpConfig, host: e.target.value })}
+                            placeholder="smtp.example.com"
+                            className="w-full pl-8 pr-3 py-2 text-xs bg-surface border border-border-dim hover:border-border-bright focus:border-amber-primary rounded-xl text-text-primary outline-none transition-all placeholder:text-text-dim/60"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Port & Protocol Selector */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-semibold text-text-secondary">Port & Security Mode</label>
+                          <div className="flex items-center gap-1 bg-surface p-0.5 rounded-lg border border-border-dim">
+                            <button
+                              type="button"
+                              onClick={() => setSmtpConfig({ ...smtpConfig, port: "587" })}
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${
+                                smtpConfig.port === "587"
+                                  ? "bg-amber-primary text-black"
+                                  : "text-text-dim hover:text-text-primary"
+                              }`}
+                            >
+                              587 (STARTTLS)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSmtpConfig({ ...smtpConfig, port: "465" })}
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${
+                                smtpConfig.port === "465"
+                                  ? "bg-amber-primary text-black"
+                                  : "text-text-dim hover:text-text-primary"
+                              }`}
+                            >
+                              465 (SSL/TLS)
+                            </button>
+                          </div>
+                        </div>
+                        <input
+                          type="text"
+                          value={smtpConfig.port}
+                          onChange={(e) => setSmtpConfig({ ...smtpConfig, port: e.target.value })}
+                          placeholder="587"
+                          className="w-full px-3 py-2 text-xs bg-surface border border-border-dim hover:border-border-bright focus:border-amber-primary rounded-xl text-text-primary outline-none transition-all placeholder:text-text-dim/60 font-mono"
+                          required
+                        />
+                      </div>
+
+                      {/* Username */}
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-semibold text-text-secondary">Username / Authentication Email</label>
+                        <div className="relative">
+                          <User size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim" />
+                          <input
+                            type="text"
+                            value={smtpConfig.user}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setSmtpConfig(prev => ({
+                                ...prev,
+                                user: val,
+                                from: prev.from || (val.includes('@') ? `"pySync Notifications" <${val}>` : prev.from)
+                              }));
+                            }}
+                            placeholder="notifications@yourdomain.com"
+                            className="w-full pl-8 pr-3 py-2 text-xs bg-surface border border-border-dim hover:border-border-bright focus:border-amber-primary rounded-xl text-text-primary outline-none transition-all placeholder:text-text-dim/60"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Password */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-semibold text-text-secondary">SMTP App Password</label>
+                          <button
+                            type="button"
+                            onClick={() => setShowSmtpPass(!showSmtpPass)}
+                            className="text-[10px] text-amber-primary hover:underline flex items-center gap-1 font-medium"
+                          >
+                            {showSmtpPass ? <EyeOff size={11} /> : <Eye size={11} />}
+                            <span>{showSmtpPass ? "Mask" : "Reveal"}</span>
+                          </button>
+                        </div>
+                        <div className="relative">
+                          <Key size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim" />
+                          <input
+                            type={showSmtpPass ? "text" : "password"}
+                            value={smtpConfig.pass}
+                            onChange={(e) => setSmtpConfig({ ...smtpConfig, pass: e.target.value })}
+                            placeholder="Enter 16-character password"
+                            className="w-full pl-8 pr-3 py-2 font-mono text-xs bg-surface border border-border-dim hover:border-border-bright focus:border-amber-primary rounded-xl text-text-primary outline-none transition-all placeholder:text-text-dim/60"
+                          />
+                        </div>
+                      </div>
+
+                      {/* From Header */}
+                      <div className="space-y-1 md:col-span-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-semibold text-text-secondary">Sender Header Name & Address</label>
+                          {smtpConfig.user && smtpConfig.user.includes("@") && (
+                            <button
+                              type="button"
+                              onClick={() => setSmtpConfig({ ...smtpConfig, from: `"pySync Notifications" <${smtpConfig.user}>` })}
+                              className="text-[10px] text-amber-primary hover:underline font-semibold"
+                            >
+                              Sync with Username
+                            </button>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          value={smtpConfig.from}
+                          onChange={(e) => setSmtpConfig({ ...smtpConfig, from: e.target.value })}
+                          placeholder='"pySync CRM" <alerts@yourdomain.com>'
+                          className="w-full px-3 py-2 text-xs bg-surface border border-border-dim hover:border-border-bright focus:border-amber-primary rounded-xl text-text-primary outline-none transition-all placeholder:text-text-dim/60"
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div className="pt-2 flex justify-end">
+                      <button
+                        type="submit"
+                        disabled={loadingSmtp}
+                        className="px-5 py-2.5 bg-amber-primary text-black font-black uppercase tracking-wider text-xs rounded-xl hover:bg-amber-primary/90 transition-all flex items-center justify-center gap-2 shadow-md active:scale-[0.99]"
+                      >
+                        {loadingSmtp ? (
+                          <>
+                            <Loader2 size={14} className="animate-spin" /> Saving Configuration...
+                          </>
+                        ) : (
+                          <>
+                            <Save size={14} /> Save SMTP Credentials
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* Deliverability Diagnostic Dispatch Card */}
+                  <div className="p-4 sm:p-5 bg-surface-2/80 rounded-2xl border border-border-dim space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold text-text-primary flex items-center gap-2">
+                        <CheckCircle2 size={15} className="text-emerald-400" />
+                        Diagnostic Delivery Test
+                      </h4>
+                      {user?.email && (
+                        <button
+                          type="button"
+                          onClick={() => setTestEmail(user.email)}
+                          className="text-[10px] text-amber-primary hover:underline font-semibold"
+                        >
+                          Target Current User ({user.email})
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-text-dim">
+                      Dispatch a test message to confirm firewall permissions, SSL handshakes, and mailbox deliverability.
+                    </p>
+
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="email"
+                        value={testEmail}
+                        onChange={(e) => setTestEmail(e.target.value)}
+                        placeholder="Recipient email address (e.g. admin@company.com)"
+                        className="flex-1 px-3 py-2 text-xs bg-surface border border-border-dim hover:border-border-bright focus:border-amber-primary rounded-xl text-text-primary outline-none transition-all placeholder:text-text-dim/60"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleTestSmtp}
+                        disabled={testingSmtp}
+                        className="px-5 py-2 bg-surface hover:bg-surface-3 border border-border-dim hover:border-amber-primary text-text-primary font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 shrink-0 active:scale-[0.99]"
+                      >
+                        {testingSmtp ? (
+                          <>
+                            <Loader2 size={13} className="animate-spin" /> Testing Relay...
+                          </>
+                        ) : (
+                          <>
+                            <Send size={13} className="text-amber-primary" /> Send Diagnostic Test
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {activeTab === "stack" && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="space-y-6"
+                >
+                  <div>
+                    <h3 className="text-xl font-bold text-text-primary mb-1">
+                      NGINX + PM2 + Certbot Stack Manager
+                    </h3>
+                    <p className="text-sm text-text-dim">
+                      Configure parameters and write production deploy/config files directly to your workspaces.
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleSaveStack} className="p-5 sm:p-6 bg-surface-2 rounded-2xl border border-border-dim space-y-4">
+                    <h4 className="text-sm font-bold text-amber-primary uppercase tracking-wider mb-2 flex items-center gap-2">
+                      <Cpu size={16} /> Server Parameters
+                    </h4>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-text-secondary">Domain Name (FQDN)</label>
+                        <input
+                          type="text"
+                          value={stackDomain}
+                          onChange={(e) => setStackDomain(e.target.value)}
+                          placeholder="e.g. pysync.yourdomain.com"
+                          className="w-full px-3 py-2 text-sm bg-surface border border-border-dim rounded-xl text-text-primary focus:outline-none focus:border-amber-primary"
+                          required
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-text-secondary">SSL Certbot Alert Email</label>
+                        <input
+                          type="email"
+                          value={stackEmail}
+                          onChange={(e) => setStackEmail(e.target.value)}
+                          placeholder="e.g. admin@yourdomain.com"
+                          className="w-full px-3 py-2 text-sm bg-surface border border-border-dim rounded-xl text-text-primary focus:outline-none focus:border-amber-primary"
+                          required
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-text-secondary">Application Port (Internal proxy target)</label>
+                        <input
+                          type="number"
+                          value={stackPort}
+                          onChange={(e) => setStackPort(Number(e.target.value))}
+                          placeholder="3000"
+                          className="w-full px-3 py-2 text-sm bg-surface border border-border-dim rounded-xl text-text-primary focus:outline-none focus:border-amber-primary"
+                          required
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-text-secondary">PM2 Instance Scaling</label>
+                        <select
+                          value={stackInstances}
+                          onChange={(e) => setStackInstances(e.target.value)}
+                          className="w-full px-3 py-2 text-sm bg-surface border border-border-dim rounded-xl text-text-primary focus:outline-none focus:border-amber-primary"
+                        >
+                          <option value="max">Max Cores (Cluster Mode)</option>
+                          <option value="1">1 Instance</option>
+                          <option value="2">2 Instances (Recommended)</option>
+                          <option value="4">4 Instances</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                      <span className="text-[11px] text-text-dim max-w-md">
+                        Saves configuration state and automatically writes physical config files to the root of your pySync workspace folder.
+                      </span>
+                      <button
+                        type="submit"
+                        disabled={savingStack}
+                        className="w-full sm:w-auto px-5 py-2.5 bg-amber-primary text-black font-bold text-xs sm:text-sm rounded-xl hover:bg-amber-primary/90 transition-all flex items-center justify-center gap-2"
+                      >
+                        {savingStack ? (
+                          <>
+                            <Loader2 size={16} className="animate-spin" /> Generating...
+                          </>
+                        ) : (
+                          <>
+                            <Save size={16} /> Save & Generate Stack
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* Generated Configurations Previewer */}
+                  <div className="p-5 sm:p-6 bg-surface-2 rounded-2xl border border-border-dim space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-bold text-amber-primary uppercase tracking-wider flex items-center gap-2">
+                        <Terminal size={16} /> Active Stack Configuration Files
+                      </h4>
+                      <span className="text-[10px] font-bold text-green-500 bg-green-500/10 px-2 py-0.5 rounded-full">
+                        Live Dynamic Preview
+                      </span>
+                    </div>
+
+                    <div className="flex border-b border-border-dim gap-2 overflow-x-auto pb-1">
+                      <button
+                        type="button"
+                        onClick={() => setActiveCodeTab("deploy")}
+                        className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${
+                          activeCodeTab === "deploy"
+                            ? "bg-amber-primary/10 text-amber-primary border border-amber-primary/30"
+                            : "text-text-secondary hover:bg-surface"
+                        }`}
+                      >
+                        deploy.sh (Automated script)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveCodeTab("nginx")}
+                        className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${
+                          activeCodeTab === "nginx"
+                            ? "bg-amber-primary/10 text-amber-primary border border-amber-primary/30"
+                            : "text-text-secondary hover:bg-surface"
+                        }`}
+                      >
+                        nginx.conf
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveCodeTab("ecosystem")}
+                        className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${
+                          activeCodeTab === "ecosystem"
+                            ? "bg-amber-primary/10 text-amber-primary border border-amber-primary/30"
+                            : "text-text-secondary hover:bg-surface"
+                        }`}
+                      >
+                        ecosystem.config.cjs
+                      </button>
+                    </div>
+
+                    <div className="relative rounded-xl overflow-hidden bg-[#0d0f14] border border-border-dim text-xs font-mono p-4 max-h-[350px] overflow-y-auto custom-scrollbar">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const code = getLiveCode();
+                          navigator.clipboard.writeText(code);
+                          if (showToast) showToast("Copied config file to clipboard!", "success");
+                        }}
+                        className="absolute top-3 right-3 p-2 bg-surface hover:bg-surface-3 border border-border-dim text-text-secondary hover:text-text-primary rounded-lg transition-colors"
+                        title="Copy configuration code"
+                      >
+                        <Copy size={14} />
+                      </button>
+                      <pre className="text-[#a9b1d6] leading-relaxed select-all overflow-x-auto">
+                        {getLiveCode()}
+                      </pre>
+                    </div>
+                  </div>
+
+                  {/* Interactive Deployment Steps Checklist */}
+                  <div className="p-5 sm:p-6 bg-surface-2 rounded-2xl border border-border-dim space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-sm font-bold text-amber-primary uppercase tracking-wider flex items-center gap-2">
+                          <CheckCircle2 size={16} /> Interactive Deployment Progress
+                        </h4>
+                        <p className="text-xs text-text-dim mt-0.5">
+                          Follow these step-by-step instructions to bring your pySync CRM instance live.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="flex items-start gap-3 p-3 bg-surface rounded-xl border border-border-dim">
+                        <div className="w-6 h-6 shrink-0 rounded-full bg-amber-primary/10 text-amber-primary text-xs font-bold flex items-center justify-center mt-0.5">1</div>
+                        <div className="flex-1 space-y-1">
+                          <p className="text-xs font-bold text-text-primary">Configure DNS A Record</p>
+                          <p className="text-[11px] text-text-secondary">Point your domain <span className="font-mono text-amber-primary font-bold">{stackDomain}</span> to your Ubuntu VPS Server IP address inside your domain provider console (GoDaddy, Cloudflare, Namecheap, etc.).</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-3 p-3 bg-surface rounded-xl border border-border-dim">
+                        <div className="w-6 h-6 shrink-0 rounded-full bg-amber-primary/10 text-amber-primary text-xs font-bold flex items-center justify-center mt-0.5">2</div>
+                        <div className="flex-1 space-y-1">
+                          <p className="text-xs font-bold text-text-primary">Transfer Deployment Files</p>
+                          <p className="text-[11px] text-text-secondary">Copy <span className="font-mono font-bold text-text-primary">deploy.sh</span>, <span className="font-mono font-bold text-text-primary">ecosystem.config.cjs</span>, and your production project files onto the Ubuntu VPS server inside your target deployment folder (e.g. <span className="font-mono">/var/www/pysync</span>).</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-3 p-3 bg-surface rounded-xl border border-border-dim">
+                        <div className="w-6 h-6 shrink-0 rounded-full bg-amber-primary/10 text-amber-primary text-xs font-bold flex items-center justify-center mt-0.5">3</div>
+                        <div className="flex-1 space-y-1">
+                          <p className="text-xs font-bold text-text-primary">Execute Automated Script</p>
+                          <p className="text-[11px] text-text-secondary">SSH into your Ubuntu server and run: <span className="block font-mono bg-surface-3 p-1.5 rounded border border-border-dim text-white mt-1">chmod +x deploy.sh && ./deploy.sh</span> This installs Nginx, Node, Certbot, obtains SSL certificates and spins up PM2 cluster mode.</p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </motion.div>
               )}
@@ -5968,11 +8391,19 @@ export default function App() {
   const [isManagerDropdownOpen, setIsManagerDropdownOpen] = useState(false);
   const [isBuilderDropdownOpen, setIsBuilderDropdownOpen] = useState(false);
   const [teamFilter, setTeamFilter] = useState<string | null>(null);
+  const [userRoleFilter, setUserRoleFilter] = useState<string>("all");
+  const [isUserRoleDropdownOpen, setIsUserRoleDropdownOpen] = useState(false);
+  const [isUserTeamDropdownOpen, setIsUserTeamDropdownOpen] = useState(false);
+  const [isUserPageSizeDropdownOpen, setIsUserPageSizeDropdownOpen] = useState(false);
+  const [userPage, setUserPage] = useState<number>(1);
+  const [userPageSize, setUserPageSize] = useState<number>(6);
+  const [userViewMode, setUserViewMode] = useState<"table" | "grid">("table");
   const [assignedToFilter, setAssignedToFilter] = useState<string>("All");
   const [builderFilter, setBuilderFilter] = useState<string>("All");
   const [statusFilter, setStatusFilter] = useState<string[]>(["All"]);
   const [possessionFilter, setPossessionFilter] = useState<string[]>(["All"]);
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+  const [showPriceAlertsOnly, setShowPriceAlertsOnly] = useState(false);
   const [bathroomsFilter, setBathroomsFilter] = useState<number[]>([]);
   const [configurationFilter, setConfigurationFilter] = useState<string[]>([]);
   const [priceRangeFilter, setPriceRangeFilter] = useState<[number, number]>([
@@ -5985,6 +8416,28 @@ export default function App() {
     0, 10000,
   ]);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
+  // Active filter counters for visual badges
+  const activeProjectFiltersCount = [
+    assignedToFilter !== "All",
+    builderFilter !== "All",
+    possessionFilter.length > 0 && !possessionFilter.includes("All"),
+    configurationFilter.length > 0,
+    priceRangeFilter[0] !== 0 || priceRangeFilter[1] !== 1000000000,
+    areaRangeFilter[0] !== 0 || areaRangeFilter[1] !== 100000,
+    bathroomsFilter.length > 0,
+    unitsRangeFilter[0] !== 0 || unitsRangeFilter[1] !== 10000,
+  ].filter(Boolean).length;
+
+  const activeResaleFiltersCount = [
+    builderFilter !== "All",
+    possessionFilter.length > 0 && !possessionFilter.includes("All"),
+    configurationFilter.length > 0,
+    priceRangeFilter[0] !== 0 || priceRangeFilter[1] !== 1000000000,
+    areaRangeFilter[0] !== 0 || areaRangeFilter[1] !== 100000,
+    bathroomsFilter.length > 0,
+  ].filter(Boolean).length;
+
   const [sortBy, setSortBy] = useState(
     () => localStorage.getItem("defaultProjectSort") || "id",
   );
@@ -5993,6 +8446,23 @@ export default function App() {
     null,
   );
   const [projects, setProjects] = useState<Project[]>([]);
+
+  // Immediately resets the search query and all project filter states
+  const handleResetProjectFiltersAndSearch = () => {
+    setSearchQuery("");
+    setAssignedToFilter("All");
+    setBuilderFilter("All");
+    setStatusFilter(["All"]);
+    setPossessionFilter(["All"]);
+    setShowFavoritesOnly(false);
+    setShowPriceAlertsOnly(false);
+    setBathroomsFilter([]);
+    setConfigurationFilter([]);
+    setPriceRangeFilter([0, 1000000000]);
+    setAreaRangeFilter([0, 100000]);
+    setUnitsRangeFilter([0, 10000]);
+    setShowAdvancedFilters(false);
+  };
 
   // Robust, unified project filter matching helper
   const matchesProjectFilters = (p: Project) => {
@@ -6015,8 +8485,40 @@ export default function App() {
     const pUnits = parseInt(String(p.totalUnits || "0").replace(/[^0-9]/g, "")) || 0;
     const matchesUnits = pUnits === 0 || (pUnits >= unitsRangeFilter[0] && pUnits <= unitsRangeFilter[1]);
     
-    return matchesBuilder && matchesSearch && matchesStatus && matchesPossession && matchesAssigned && matchesBathrooms && matchesConfig && matchesPrice && matchesArea && matchesUnits;
+    const matchesPriceAlert = !showPriceAlertsOnly || !!priceAlerts[p.id];
+
+    return matchesBuilder && matchesSearch && matchesStatus && matchesPossession && matchesAssigned && matchesBathrooms && matchesConfig && matchesPrice && matchesArea && matchesUnits && matchesPriceAlert;
   };
+
+  const matchesResaleFilters = (p: ResaleProperty) => {
+    const matchesBuilder = builderFilter === "All" || p.builderName === builderFilter;
+    const matchesSearch =
+      p.propertyHolderName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.societyName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (p.propertyType || "").toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesStatus = statusFilter.includes("All") || statusFilter.includes(p.status);
+    const matchesPossession = possessionFilter.includes("All") || possessionFilter.includes(p.possessionStatus);
+    
+    // Price Filter
+    const matchesPrice = p.price >= priceRangeFilter[0] && p.price <= priceRangeFilter[1];
+
+    // Bathrooms check: p.bathrooms is a string
+    const pBathrooms = parseInt(p.bathrooms || "0") || 0;
+    const matchesBathrooms = bathroomsFilter.length === 0 || bathroomsFilter.includes(pBathrooms);
+
+    // BHK size check
+    const matchesConfig = configurationFilter.length === 0 || configurationFilter.some((config) => {
+      return (p.bhk || "").toLowerCase().includes(config.toLowerCase());
+    });
+
+    // Area sizeSqft
+    const pArea = p.sizeSqft || 0;
+    const matchesArea = pArea === 0 || (pArea >= areaRangeFilter[0] && pArea <= areaRangeFilter[1]);
+
+    return matchesBuilder && matchesSearch && matchesStatus && matchesPossession && matchesPrice && matchesBathrooms && matchesConfig && matchesArea;
+  };
+
   const [resaleProperties, setResaleProperties] = useState<ResaleProperty[]>(
     [],
   );
@@ -6276,10 +8778,8 @@ export default function App() {
     new Set(
       [
         ...(Array.isArray(projects) ? projects : []).map((p) => p.builderName),
-        ...(Array.isArray(resaleProperties) ? resaleProperties : []).map(
-          (p) => p.builderName,
-        ),
-      ].filter((builderName): builderName is string => Boolean(builderName)),
+        ...(Array.isArray(resaleProperties) ? resaleProperties : []).map((p) => p.builderName),
+      ].filter(Boolean),
     ),
   );
 
@@ -6287,7 +8787,7 @@ export default function App() {
     new Set(
       (Array.isArray(resaleProperties) ? resaleProperties : [])
         .map((p) => p.societyName)
-        .filter((societyName): societyName is string => Boolean(societyName)),
+        .filter(Boolean),
     ),
   );
 
@@ -6317,6 +8817,9 @@ export default function App() {
           `/api/projects/${project.id}?role=${user?.role}&userName=${user?.name}`,
           {
             method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+            },
             body: JSON.stringify({
               [type]: updatedItems,
             }),
@@ -6347,10 +8850,13 @@ export default function App() {
   const handleDeleteMediaFile = async (project: any, fileToDelete: any, type: "pdfs" | "images") => {
     const updatedItems = (project[type] || []).filter((item: any) => item.name !== fileToDelete.name);
     try {
-      const response = await request(
+       const response = await request(
         `/api/projects/${project.id}?role=${user?.role}&userName=${user?.name}`,
         {
           method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
           body: JSON.stringify({
             [type]: updatedItems,
           }),
@@ -6402,10 +8908,7 @@ export default function App() {
     localStorage.setItem("draft_user", JSON.stringify(newUser));
     setLastSavedUser(new Date());
   }, [newUser]);
-  const [createdUserCredentials, setCreatedUserCredentials] = useState<{
-    username: string;
-    password: string;
-  } | null>(null);
+  const [createdUserCredentials, setCreatedUserCredentials] = useState<UserCredentials | null>(null);
   const [userError, setUserError] = useState("");
   const [loginForm, setLoginForm] = useState({
     email: "admin@pysync.local",
@@ -6413,7 +8916,7 @@ export default function App() {
   });
   const [loginError, setLoginError] = useState("");
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [isRegistering, setIsRegistering] = useState(false);
+  const [initialLoginUser, setInitialLoginUser] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -6441,9 +8944,38 @@ export default function App() {
   const [accentColor, setAccentColor] = useState(
     () => localStorage.getItem("accentColor") || "amber",
   );
-  const [theme, setTheme] = useState(
-    () => localStorage.getItem("theme") || "dark",
-  );
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem("theme");
+    if (saved && (saved === "light" || saved === "dark" || saved === "system")) {
+      return saved;
+    }
+    return "system";
+  });
+  const [systemTheme, setSystemTheme] = useState<"dark" | "light">(() => {
+    if (typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+      return "dark";
+    }
+    return "light";
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const handleChange = (e: MediaQueryListEvent) => {
+      setSystemTheme(e.matches ? "dark" : "light");
+    };
+
+    if (mediaQuery.addEventListener) {
+      mediaQuery.addEventListener("change", handleChange);
+      return () => mediaQuery.removeEventListener("change", handleChange);
+    } else if ((mediaQuery as any).addListener) {
+      (mediaQuery as any).addListener(handleChange);
+      return () => (mediaQuery as any).removeListener(handleChange);
+    }
+  }, []);
+
+  const effectiveTheme = theme === "system" ? systemTheme : theme;
+
   const [themeRipple, setThemeRipple] = useState<{
     active: boolean;
     x: number;
@@ -6454,6 +8986,7 @@ export default function App() {
   const handleThemeChange = (newTheme: string, event?: any) => {
     if (newTheme === theme) return;
     if (themeRipple?.active) return;
+    const targetEffective = newTheme === "system" ? systemTheme : newTheme;
     if (reducedMotion) {
       setTheme(newTheme);
       return;
@@ -6480,7 +9013,7 @@ export default function App() {
       active: true,
       x,
       y,
-      toTheme: newTheme,
+      toTheme: targetEffective,
     });
 
     // Change the core theme at 350ms, when the expand is fully covering the screen
@@ -6502,6 +9035,13 @@ export default function App() {
   const [reducedMotion, setReducedMotion] = useState(
     () => localStorage.getItem("reducedMotion") === "true",
   );
+  const [assignedRegion, setAssignedRegionState] = useState(
+    () => localStorage.getItem("assignedRegion") || "Gurugram",
+  );
+  const setAssignedRegion = (val: string) => {
+    localStorage.setItem("assignedRegion", val);
+    setAssignedRegionState(val);
+  };
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
   const [isReportEditing, setIsReportEditing] = useState(false);
   const [showFullReport, setShowFullReport] = useState(false);
@@ -6539,7 +9079,7 @@ export default function App() {
 
   useEffect(() => {
     const root = document.documentElement;
-    root.classList.toggle("light", theme === "light");
+    root.classList.toggle("light", effectiveTheme === "light");
     root.style.setProperty(
       "--font-family",
       fontFamily === "mono"
@@ -6566,7 +9106,7 @@ export default function App() {
     const selected = colors[accentColor] || colors.amber;
     root.style.setProperty("--accent-primary", selected.primary);
     root.style.setProperty("--accent-secondary", selected.secondary);
-  }, [accentColor, theme, fontFamily, fontSize, reducedMotion]);
+  }, [accentColor, effectiveTheme, fontFamily, fontSize, reducedMotion]);
 
   const playSound = (
     type: "click" | "success" | "error" | "notify" = "click",
@@ -6635,6 +9175,7 @@ export default function App() {
   const [resetSuccess, setResetSuccess] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
   const [debugResetLink, setDebugResetLink] = useState("");
+  const [debugOtp, setDebugOtp] = useState("");
   const [forgotIsError, setForgotIsError] = useState(false);
   const [forgotMessage, setForgotMessage] = useState("");
   const [isSendingReset, setIsSendingReset] = useState(false);
@@ -6653,26 +9194,139 @@ export default function App() {
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
+  // Price Alert Subscription State
+  const [priceAlerts, setPriceAlerts] = useState<
+    Record<
+      string,
+      {
+        projectId: string;
+        projectTitle: string;
+        lastKnownPrice: number;
+        lastKnownStatus: string;
+        createdAt: string;
+      }
+    >
+  >(() => {
+    try {
+      const saved = localStorage.getItem("pysync_price_alerts");
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const handleTogglePriceAlert = (proj: Project) => {
+    setPriceAlerts((prev) => {
+      const isExisting = !!prev[proj.id];
+      const next = { ...prev };
+      if (isExisting) {
+        delete next[proj.id];
+        try {
+          localStorage.setItem("pysync_price_alerts", JSON.stringify(next));
+        } catch {}
+        showToast(`🔕 Price & Status Alert turned OFF for "${proj.title}"`, "info");
+      } else {
+        next[proj.id] = {
+          projectId: proj.id,
+          projectTitle: proj.title,
+          lastKnownPrice: proj.price,
+          lastKnownStatus: proj.status,
+          createdAt: new Date().toISOString(),
+        };
+        try {
+          localStorage.setItem("pysync_price_alerts", JSON.stringify(next));
+        } catch {}
+        showToast(
+          `🔔 Price Alert ON: Tracking "${proj.title}" (${formatPrice(proj.price)}, ${proj.status}). You will receive notifications on price drops and status changes!`,
+          "success",
+        );
+      }
+      return next;
+    });
+  };
+
+  // Watcher: Monitor live project price drops or status updates for subscribed alerts
+  const prevAlertProjectsMapRef = useRef<Map<string, { price: number; status: string }>>(new Map());
+  useEffect(() => {
+    if (!projects || projects.length === 0) return;
+
+    if (prevAlertProjectsMapRef.current.size === 0) {
+      const initMap = new Map<string, { price: number; status: string }>();
+      projects.forEach((p) => initMap.set(p.id, { price: p.price, status: p.status }));
+      prevAlertProjectsMapRef.current = initMap;
+      return;
+    }
+
+    let hasAlertChanges = false;
+    const updatedAlerts = { ...priceAlerts };
+
+    projects.forEach((currProj) => {
+      const prevData = prevAlertProjectsMapRef.current.get(currProj.id);
+      const alert = updatedAlerts[currProj.id];
+
+      if (alert && prevData) {
+        // Price Drop Event
+        if (currProj.price < prevData.price) {
+          const dropAmount = prevData.price - currProj.price;
+          showToast(
+            `🚨 Price Drop Alert: "${currProj.title}" price dropped from ${formatPrice(prevData.price)} to ${formatPrice(currProj.price)} (Saved ${formatPrice(dropAmount)})!`,
+            "success",
+          );
+          updatedAlerts[currProj.id] = {
+            ...alert,
+            lastKnownPrice: currProj.price,
+          };
+          hasAlertChanges = true;
+        }
+
+        // Status Change Event
+        if (currProj.status !== prevData.status) {
+          showToast(
+            `📢 Status Change Alert: "${currProj.title}" status changed from "${prevData.status}" to "${currProj.status}"!`,
+            "info",
+          );
+          updatedAlerts[currProj.id] = {
+            ...alert,
+            lastKnownStatus: currProj.status,
+          };
+          hasAlertChanges = true;
+        }
+      }
+    });
+
+    const newMap = new Map<string, { price: number; status: string }>();
+    projects.forEach((p) => newMap.set(p.id, { price: p.price, status: p.status }));
+    prevAlertProjectsMapRef.current = newMap;
+
+    if (hasAlertChanges) {
+      setPriceAlerts(updatedAlerts);
+      try {
+        localStorage.setItem("pysync_price_alerts", JSON.stringify(updatedAlerts));
+      } catch {}
+    }
+  }, [projects]);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const token = params.get("token");
     if (token) {
       setResetToken(token);
-      // Clear the token from the URL without reloading
+    }
+    const welcomeUser = params.get("user") || params.get("username") || params.get("email");
+    const isWelcome = params.get("welcome") === "true";
+    if (welcomeUser) {
+      setInitialLoginUser(welcomeUser);
+      setLoginForm((prev) => ({ ...prev, email: welcomeUser }));
+      if (isWelcome) {
+        showToast("Welcome! Please enter your generated credentials to sign in.", "info");
+      }
+    }
+    if (token || welcomeUser || isWelcome) {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setIsSearchFocused(false);
-        (document.activeElement as HTMLElement)?.blur();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+
 
   const showToast = (
     message: string,
@@ -6692,6 +9346,10 @@ export default function App() {
 
   const request = async (url: string, options: RequestInit = {}, retries = 5, delayMs = 2000): Promise<any> => {
     const headers = new Headers(options.headers || {});
+
+    if (options.body && typeof options.body === "string" && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
 
     // Attempt to attach token authorization
     const token = localStorage.getItem("token");
@@ -7026,7 +9684,7 @@ export default function App() {
           const serverNotifs = Array.isArray(data.notifications) ? data.notifications : [];
           setNotifications((prev) => {
             const testNotifs = prev.filter((n) => n.id && n.id.toString().startsWith("test-"));
-            const mergedServerNotifs = serverNotifs.map((sn: any) => {
+            const mergedServerNotifs = serverNotifs.map((sn) => {
               const localMatch = prev.find((pn) => pn.id === sn.id);
               if (localMatch) {
                 const combinedReadBy = Array.from(new Set([...(sn.readBy || []), ...(localMatch.readBy || [])]));
@@ -7035,7 +9693,7 @@ export default function App() {
               return sn;
             });
             const mergedList = [...testNotifs];
-            mergedServerNotifs.forEach((sn: { id: any; }) => {
+            mergedServerNotifs.forEach((sn) => {
               if (!mergedList.some((mn) => mn.id === sn.id)) {
                 mergedList.push(sn);
               }
@@ -7548,10 +10206,12 @@ export default function App() {
       setCreatedUserCredentials({
         username: data.username,
         password: data.password,
+        email: data.email || formData.email,
+        loginLink: data.loginLink,
       });
       setNewUser({ name: "", email: "", role: "employee", phoneNumber: "" });
       localStorage.removeItem("draft_user");
-      showToast("User created successfully", "success");
+      showToast("User ID created & invitation link generated!", "success");
       refreshData();
     } catch (err: any) {
       setUserError(err.message);
@@ -7759,31 +10419,7 @@ export default function App() {
     }
   };
 
-  const handleRegister = async (data: any) => {
-    setLoginError("");
-    setIsLoggingIn(true);
-    try {
-      await request(`${window.location.origin}/api/auth/signup`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: data.fullName,
-          email: data.email,
-          phoneNumber: data.phoneNumber,
-          password: data.password,
-          role: "employee", // Default to employee for self-registration
-        }),
-      });
-      showToast("Registration successful! Please login with your credentials.", "success");
-      setIsRegistering(false);
-    } catch (err: any) {
-      setLoginError(err.message);
-    } finally {
-      setIsLoggingIn(false);
-    }
-  };
-
-  const handleForgotPassword = async (email: string) => {
+  const handleForgotPassword = async (email: string): Promise<boolean> => {
     setForgotEmail(email);
     setForgotMessage("");
     setDebugResetLink("");
@@ -7799,16 +10435,19 @@ export default function App() {
       if (data.isError) {
         setForgotIsError(true);
         showToast(data.message, "error");
+        return false;
       } else {
         showToast(data.message, "success");
-      }
-      if (data.debugResetLink) {
-        setDebugResetLink(data.debugResetLink);
+        if (data.debugResetLink) {
+          setDebugResetLink(data.debugResetLink);
+        }
+        return true;
       }
     } catch (err: any) {
       setForgotMessage(err.message);
       setForgotIsError(true);
       showToast(err.message, "error");
+      return false;
     } finally {
       setIsSendingReset(false);
     }
@@ -7981,23 +10620,6 @@ export default function App() {
                       </button>
                     </div>
                   </motion.div>
-                ) : isRegistering ? (
-                  <motion.div
-                    key="register"
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: 20 }}
-                  >
-                    <RegisterForm
-                      onRegister={handleRegister}
-                      onBack={() => {
-                        setIsRegistering(false);
-                        setLoginError("");
-                      }}
-                      isLoading={isLoggingIn}
-                      error={loginError}
-                    />
-                  </motion.div>
                 ) : forgotPassword ? (
                   <motion.div
                     key="forgot"
@@ -8037,9 +10659,9 @@ export default function App() {
                     <LoginForm
                       onLogin={handleLogin}
                       onForgotPassword={() => setForgotPassword(true)}
-                      onRegister={() => setIsRegistering(true)}
                       isLoading={isLoggingIn}
                       error={loginError}
+                      initialIdentifier={initialLoginUser}
                     />
 
                     <div className="mt-6 space-y-3 pt-4 border-t border-border-dim/20">
@@ -8175,14 +10797,16 @@ export default function App() {
       ) : (
         <div className="flex w-full h-screen bg-bg overflow-hidden relative">
           {/* Animated Background Grid */}
-          <div
-            className="absolute inset-0 opacity-[0.03] pointer-events-none"
-            style={{
-              backgroundImage:
-                "radial-gradient(circle, #f59e0b 1px, transparent 1px)",
-              backgroundSize: "40px 40px",
-            }}
-          />
+          {activeTab !== "media" && (
+            <div
+              className="absolute inset-0 opacity-[0.03] pointer-events-none"
+              style={{
+                backgroundImage:
+                  "radial-gradient(circle, #f59e0b 1px, transparent 1px)",
+                backgroundSize: "40px 40px",
+              }}
+            />
+          )}
 
           {/* Mobile Menu Overlay */}
           <AnimatePresence>
@@ -8315,34 +10939,18 @@ export default function App() {
                     playSound("click");
                   }}
                 />
-              </div>
-
-              {/* System Health Monitor */}
-              <div className="px-4 pt-4">
-                <div className="p-3 bg-surface-2/50 border border-border-dim rounded-xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[8px] text-text-dim uppercase tracking-widest font-bold">
-                      System Health
-                    </span>
-                    <span className="text-[8px] text-green-500 font-bold">
-                      99.9%
-                    </span>
-                  </div>
-                  <div className="h-1 w-full bg-surface-3 rounded-full overflow-hidden">
-                    <motion.div
-                      initial={{ width: "0%" }}
-                      animate={{ width: "99.9%" }}
-                      transition={{ duration: 2, ease: "easeOut" }}
-                      className="h-full bg-gradient-to-r from-amber-primary to-green-500"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-1 h-1 rounded-full bg-green-500 animate-pulse" />
-                    <span className="text-[7px] text-text-dim font-mono truncate">
-                      DB_SYNC_ACTIVE: {new Date().toLocaleTimeString()}
-                    </span>
-                  </div>
-                </div>
+                <SidebarItem
+                  icon={Settings}
+                  label="Settings"
+                  active={isSettingsModalOpen}
+                  onClick={() => {
+                    setSettingsInitialTab("account");
+                    setIsSettingsModalOpen(true);
+                    setIsMobileMenuOpen(false);
+                    playSound?.("click");
+                  }}
+                  className="md:hidden"
+                />
               </div>
             </div>
 
@@ -9481,10 +12089,10 @@ export default function App() {
                 )}
                 <div className="relative group">
                   <div
-                    className={`flex items-center gap-2 bg-surface-2 border transition-all duration-200 rounded-xl px-2 sm:px-4 py-2 ${isSearchFocused ? "border-amber-primary ring-4 ring-amber-primary/10 w-40 sm:w-96" : "border-border-bright w-24 sm:w-64"}`}
+                    className={`flex items-center gap-2 bg-surface-2 border transition-all duration-200 rounded-xl px-2.5 sm:px-4 py-1.5 sm:py-2 ${isSearchFocused ? "border-amber-primary ring-4 ring-amber-primary/10 w-52 sm:w-96" : "border-border-bright w-32 sm:w-72"}`}
                   >
                     <Search
-                      size={16}
+                      size={15}
                       className={`${isSearchFocused ? "text-amber-primary" : "text-text-dim"} shrink-0`}
                     />
                     <input
@@ -9500,10 +12108,21 @@ export default function App() {
                     />
                     {searchQuery && (
                       <button
-                        onClick={() => setSearchQuery("")}
-                        className="text-text-dim hover:text-text-primary transition-colors"
+                        type="button"
+                        id="btn-dashboard-search-clear-all"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          handleResetProjectFiltersAndSearch();
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleResetProjectFiltersAndSearch();
+                        }}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-primary/15 hover:bg-amber-primary text-amber-primary hover:text-bg border border-amber-primary/30 hover:border-amber-primary transition-all text-[10px] font-mono font-bold uppercase tracking-wider shrink-0 cursor-pointer shadow-xs active:scale-95 group/clear"
+                        title="Clear search text and reset all project filters"
                       >
-                        <X size={14} />
+                        <span>Clear All</span>
+                        <X size={11} className="shrink-0 group-hover/clear:rotate-90 transition-transform duration-150" />
                       </button>
                     )}
                   </div>
@@ -9514,7 +12133,7 @@ export default function App() {
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 15, scale: 0.98 }}
                         transition={{ duration: 0.15 }}
-                        className="absolute top-full mt-3 left-0 sm:-right-24 bg-surface border border-border-dim rounded-2xl shadow-2xl z-50 max-h-[480px] overflow-y-auto custom-scrollbar p-4 space-y-4 min-w-[300px] sm:w-[500px]"
+                        className="absolute top-full mt-3 right-0 sm:left-0 sm:right-auto bg-surface border border-border-dim rounded-2xl shadow-2xl z-50 max-h-[75vh] sm:max-h-[480px] overflow-y-auto custom-scrollbar p-3 sm:p-4 space-y-4 w-[calc(100vw-2rem)] sm:w-[500px] max-w-[500px]"
                       >
                         {!searchQuery ? (
                           <div className="space-y-4 p-1">
@@ -9565,12 +12184,7 @@ export default function App() {
                                       new Set(
                                         projects
                                           .map((p) => p.builderName)
-                                          .filter(
-                                            (
-                                              builderName,
-                                            ): builderName is string =>
-                                              Boolean(builderName),
-                                          ),
+                                          .filter(Boolean),
                                       ),
                                     )
                                       .slice(0, 10)
@@ -10036,7 +12650,7 @@ export default function App() {
                     setSettingsInitialTab("account");
                     setIsSettingsModalOpen(true);
                   }}
-                  className="flex items-center gap-2 p-1.5 pr-3 text-text-dim hover:text-amber-primary transition-colors border border-border-dim hover:border-amber-primary/30 rounded-lg group"
+                  className="hidden md:flex items-center gap-2 p-1.5 pr-3 text-text-dim hover:text-amber-primary transition-colors border border-border-dim hover:border-amber-primary/30 rounded-lg group"
                   title="Settings"
                 >
                   <div className="w-6 h-6 rounded-full bg-amber-primary/20 flex items-center justify-center text-[10px] font-bold text-amber-primary overflow-hidden border border-amber-primary/10 group-hover:border-amber-primary/30 transition-all">
@@ -10067,24 +12681,50 @@ export default function App() {
                       initial={{ opacity: 0, scale: 0.98 }}
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.98 }}
-                      className="space-y-10 pb-12 w-full max-w-none"
+                      className="space-y-8 pb-12 w-full max-w-none"
                     >
-                      <div className="flex items-center gap-6 mb-8">
-                        <div className="w-16 h-16 rounded-2xl bg-amber-primary/10 flex items-center justify-center text-amber-primary shadow-inner border border-amber-primary/20">
-                          <ShieldCheck size={32} />
-                        </div>
-                        <div>
-                          <h1 className="text-3xl font-serif font-bold text-text-primary tracking-tight">
-                            Super Admin Control Center
-                          </h1>
-                          <p className="text-sm text-text-dim">
-                            Global system administration, user governance, and
-                            security auditing.
-                          </p>
+                      {/* Admin Hero Header */}
+                      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-surface-2 via-surface to-surface-2/60 border border-border-bright p-6 sm:p-8 shadow-2xl backdrop-blur-md">
+                        <div className="absolute top-0 right-0 w-80 h-80 bg-amber-primary/10 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none" />
+                        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                          <div className="flex items-center gap-5">
+                            <div className="w-14 h-14 rounded-2xl bg-amber-primary/15 flex items-center justify-center text-amber-primary border border-amber-primary/30 shadow-lg shadow-amber-primary/10">
+                              <ShieldCheck size={28} />
+                            </div>
+                            <div className="space-y-1">
+                              <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-amber-primary/10 border border-amber-primary/20 text-[10px] font-mono font-bold text-amber-primary uppercase tracking-widest">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                <span>Super Admin Privileges Active</span>
+                              </div>
+                              <h1 className="text-2xl sm:text-3xl font-serif font-bold text-text-primary tracking-tight">
+                                Super Admin Control Center
+                              </h1>
+                              <p className="text-xs text-text-dim max-w-xl leading-relaxed">
+                                Global system administration, role governance, database tools, and security auditing.
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <button
+                              onClick={() => setActiveTab("logs")}
+                              className="px-4 py-2.5 bg-surface-2/80 hover:bg-surface-2 border border-border-bright hover:border-amber-primary/40 rounded-xl text-xs font-bold text-text-primary transition-all flex items-center gap-2 cursor-pointer shadow-sm"
+                            >
+                              <Activity size={14} className="text-amber-primary" />
+                              <span>Live Logs</span>
+                            </button>
+                            <button
+                              onClick={() => setActiveTab("users")}
+                              className="px-4 py-2.5 bg-amber-primary hover:bg-amber-secondary text-bg font-bold rounded-xl text-xs transition-all flex items-center gap-2 cursor-pointer shadow-lg shadow-amber-primary/20"
+                            >
+                              <UserPlus size={14} />
+                              <span>Manage Team</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      {/* Admin KPIs */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                         <KpiCard
                           label="Total Users"
                           value={users.length}
@@ -10097,7 +12737,7 @@ export default function App() {
                           value={logs.length}
                           icon={Activity}
                           color="red"
-                          sub={`${logs.length > 100 ? "Review required" : "System healthy"}`}
+                          sub={`${logs.length > 100 ? "Active auditing" : "System healthy"}`}
                         />
                         <KpiCard
                           label="Approval Queue"
@@ -10108,72 +12748,86 @@ export default function App() {
                         />
                       </div>
 
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         <DashboardSection
                           title="Administrative Quick Links"
                           icon={ShieldCheck}
                         >
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                             <button
                               onClick={() => setActiveTab("users")}
-                              className="p-4 rounded-xl border border-border-dim/50 bg-surface-2 hover:border-amber-primary/50 transition-all text-left group"
+                              className="p-4 rounded-2xl border border-border-bright bg-surface-2/50 hover:bg-surface-2 hover:border-amber-primary/40 transition-all text-left group cursor-pointer relative overflow-hidden shadow-sm"
                             >
-                              <UsersIcon
-                                size={24}
-                                className="text-amber-primary mb-3 group-hover:scale-110 transition-transform"
-                              />
-                              <h3 className="text-sm font-bold text-text-primary">
+                              <div className="w-10 h-10 rounded-xl bg-amber-primary/10 border border-amber-primary/20 flex items-center justify-center text-amber-primary mb-3 group-hover:scale-110 transition-transform">
+                                <UsersIcon size={20} />
+                              </div>
+                              <h3 className="text-xs font-bold text-text-primary group-hover:text-amber-primary transition-colors">
                                 Manage Users
                               </h3>
-                              <p className="text-[10px] text-text-dim">
-                                Create, edit, and assign roles to system
-                                members.
+                              <p className="text-[10px] text-text-dim mt-0.5 leading-relaxed">
+                                Create, edit, and assign roles to system members.
                               </p>
+                              <div className="mt-3 flex items-center gap-1 text-[10px] font-mono font-bold text-amber-primary uppercase tracking-wider">
+                                <span>Access</span>
+                                <ArrowUpRight size={12} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                              </div>
                             </button>
+
                             <button
                               onClick={() => setActiveTab("logs")}
-                              className="p-4 rounded-xl border border-border-dim/50 bg-surface-2 hover:border-amber-primary/50 transition-all text-left group"
+                              className="p-4 rounded-2xl border border-border-bright bg-surface-2/50 hover:bg-surface-2 hover:border-amber-primary/40 transition-all text-left group cursor-pointer relative overflow-hidden shadow-sm"
                             >
-                              <Activity
-                                size={24}
-                                className="text-red-500 mb-3 group-hover:scale-110 transition-transform"
-                              />
-                              <h3 className="text-sm font-bold text-text-primary">
+                              <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 mb-3 group-hover:scale-110 transition-transform">
+                                <Activity size={20} />
+                              </div>
+                              <h3 className="text-xs font-bold text-text-primary group-hover:text-amber-primary transition-colors">
                                 Audit Logs
                               </h3>
-                              <p className="text-[10px] text-text-dim">
-                                Monitor all system actions and transitions.
+                              <p className="text-[10px] text-text-dim mt-0.5 leading-relaxed">
+                                Monitor all system actions and state transitions.
                               </p>
+                              <div className="mt-3 flex items-center gap-1 text-[10px] font-mono font-bold text-amber-primary uppercase tracking-wider">
+                                <span>Access</span>
+                                <ArrowUpRight size={12} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                              </div>
                             </button>
+
                             <button
                               onClick={() => setActiveTab("database")}
-                              className="p-4 rounded-xl border border-border-dim/50 bg-surface-2 hover:border-amber-primary/50 transition-all text-left group"
+                              className="p-4 rounded-2xl border border-border-bright bg-surface-2/50 hover:bg-surface-2 hover:border-amber-primary/40 transition-all text-left group cursor-pointer relative overflow-hidden shadow-sm"
                             >
-                              <DatabaseIcon
-                                size={24}
-                                className="text-purple-500 mb-3 group-hover:scale-110 transition-transform"
-                              />
-                              <h3 className="text-sm font-bold text-text-primary">
+                              <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 mb-3 group-hover:scale-110 transition-transform">
+                                <DatabaseIcon size={20} />
+                              </div>
+                              <h3 className="text-xs font-bold text-text-primary group-hover:text-amber-primary transition-colors">
                                 Database Tool
                               </h3>
-                              <p className="text-[10px] text-text-dim">
-                                Direct access to raw system data tables.
+                              <p className="text-[10px] text-text-dim mt-0.5 leading-relaxed">
+                                Direct access to raw system data tables & query tool.
                               </p>
+                              <div className="mt-3 flex items-center gap-1 text-[10px] font-mono font-bold text-amber-primary uppercase tracking-wider">
+                                <span>Access</span>
+                                <ArrowUpRight size={12} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                              </div>
                             </button>
+
                             <button
                               onClick={() => setActiveTab("approvals")}
-                              className="p-4 rounded-xl border border-border-dim/50 bg-surface-2 hover:border-amber-primary/50 transition-all text-left group"
+                              className="p-4 rounded-2xl border border-border-bright bg-surface-2/50 hover:bg-surface-2 hover:border-amber-primary/40 transition-all text-left group cursor-pointer relative overflow-hidden shadow-sm"
                             >
-                              <Clock
-                                size={24}
-                                className="text-blue-500 mb-3 group-hover:scale-110 transition-transform"
-                              />
-                              <h3 className="text-sm font-bold text-text-primary">
+                              <div className="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 mb-3 group-hover:scale-110 transition-transform">
+                                <Clock size={20} />
+                              </div>
+                              <h3 className="text-xs font-bold text-text-primary group-hover:text-amber-primary transition-colors">
                                 Approvals Queue
                               </h3>
-                              <p className="text-[10px] text-text-dim">
+                              <p className="text-[10px] text-text-dim mt-0.5 leading-relaxed">
                                 Review and authorize sensitive data requests.
                               </p>
+                              <div className="mt-3 flex items-center gap-1 text-[10px] font-mono font-bold text-amber-primary uppercase tracking-wider">
+                                <span>Access</span>
+                                <ArrowUpRight size={12} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                              </div>
                             </button>
                           </div>
                         </DashboardSection>
@@ -10181,33 +12835,48 @@ export default function App() {
                         <DashboardSection
                           title="Recent System Activity"
                           icon={Activity}
+                          action={
+                            <button
+                              onClick={() => setActiveTab("logs")}
+                              className="text-xs text-amber-primary hover:underline uppercase tracking-wider font-mono font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <span>View All</span>
+                              <ArrowUpRight size={13} />
+                            </button>
+                          }
                         >
-                          <div className="space-y-4">
+                          <div className="space-y-2">
                             {logs.slice(0, 5).map((log) => (
                               <div
                                 key={log.id}
-                                className="flex items-start gap-3 text-xs"
+                                className="flex items-center justify-between p-3 rounded-xl bg-surface-2/40 border border-border-dim/40 hover:border-amber-primary/30 transition-all text-xs"
                               >
-                                <div className="w-1.5 h-1.5 rounded-full bg-amber-primary mt-1.5 shrink-0" />
-                                <div>
-                                  <span className="font-bold text-text-primary">
-                                    {log.action}:
-                                  </span>{" "}
-                                  <span className="text-text-secondary">
-                                    {log.summary}
-                                  </span>
-                                  <div className="text-[9px] text-text-dim mt-0.5">
-                                    {new Date(log.timestamp).toLocaleString()}
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <div className="w-2 h-2 rounded-full bg-amber-primary shrink-0" />
+                                  <div className="min-w-0">
+                                    <span className="font-bold text-text-primary uppercase tracking-wider text-[11px]">
+                                      {log.action?.replace(/_/g, " ")}:
+                                    </span>{" "}
+                                    <span className="text-text-secondary truncate text-[11px]">
+                                      {log.summary}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="text-right shrink-0 pl-2">
+                                  <div className="text-[9px] text-text-dim font-mono">
+                                    {new Date(log.timestamp).toLocaleTimeString([], {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
                                   </div>
                                 </div>
                               </div>
                             ))}
-                            <button
-                              onClick={() => setActiveTab("logs")}
-                              className="w-full py-2 text-[10px] font-bold uppercase tracking-[0.2em] text-text-dim hover:text-amber-primary transition-colors border-t border-border-dim/30 mt-2"
-                            >
-                              View Full System History
-                            </button>
+                            {logs.length === 0 && (
+                              <div className="py-6 text-center text-xs text-text-dim italic">
+                                No recent activity logged.
+                              </div>
+                            )}
                           </div>
                         </DashboardSection>
                       </div>
@@ -10220,86 +12889,99 @@ export default function App() {
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -10 }}
-                      className="space-y-10 pb-12 w-full max-w-none"
+                      className="space-y-8 pb-12 w-full max-w-none"
                     >
                       {/* Welcome Hero Section */}
                       <motion.div
                         initial={{ opacity: 0, scale: 0.98 }}
                         animate={{ opacity: 1, scale: 1 }}
                         transition={{ duration: 0.5 }}
-                        className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-surface-2 to-surface border border-border-dim p-6 sm:p-12 shadow-2xl  w-full"
+                        className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-surface-2 via-surface to-surface-2/60 border border-border-bright p-6 sm:p-10 shadow-2xl w-full"
                       >
-                        <div className="absolute top-0 right-0 w-1/2 h-full bg-amber-primary/5 blur-[40px] -mr-24 -mt-24 pointer-events-none" />
-                        <div className="absolute bottom-0 left-0 w-1/3 h-1/2 bg-blue-500/5 blur-[40px] -ml-24 -mb-24 pointer-events-none" />
+                        <div className="absolute top-0 right-0 w-96 h-96 bg-amber-primary/10 rounded-full blur-3xl -mr-32 -mt-32 pointer-events-none" />
+                        <div className="absolute bottom-0 left-0 w-80 h-80 bg-blue-500/5 rounded-full blur-3xl -ml-24 -mb-24 pointer-events-none" />
 
-                        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-8">
-                          <div className="space-y-4">
-                            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-primary/10 border border-amber-primary/20 text-[10px] font-bold text-amber-primary uppercase tracking-widest">
-                              <ShieldCheck size={12} />
-                              System Secure & Operational
-                            </div>
-                            <h2 className="text-4xl sm:text-5xl font-serif font-bold text-text-primary tracking-tight leading-[1.1]">
-                              Welcome back, <br />
-                              <span className="text-amber-primary">
-                                {user?.name?.split(" ")[0]}
+                        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-8">
+                          <div className="space-y-4 max-w-2xl">
+                            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-serif font-bold text-text-primary tracking-tight leading-[1.1]">
+                              Welcome back,{" "}
+                              <span className="text-amber-primary bg-gradient-to-r from-amber-400 to-amber-200 bg-clip-text text-transparent">
+                                {user?.name?.split(" ")[0] || "Executive"}
                               </span>
                             </h2>
-                            <p className="text-sm text-text-secondary max-w-md leading-relaxed">
-                              Your real estate portfolio is performing at peak
-                              efficiency. You have{" "}
-                              <span className="text-text-primary font-bold">
+
+                            <p className="text-sm text-text-secondary leading-relaxed">
+                              Your real estate portfolio is performing at peak efficiency. You have{" "}
+                              <span className="text-amber-primary font-bold px-1.5 py-0.5 rounded bg-amber-primary/10 border border-amber-primary/20">
                                 {stats.pending} tasks
                               </span>{" "}
                               requiring your immediate attention today.
                             </p>
-                            <div className="flex items-center gap-4 pt-2">
+
+                            <div className="flex flex-wrap items-center gap-4 pt-2">
                               <button
                                 onClick={() => setActiveTab("projects")}
-                                className="px-6 py-3 bg-amber-primary text-bg rounded-xl text-xs font-bold hover:bg-amber-secondary transition-all shadow-lg shadow-amber-primary/20 flex items-center gap-2"
+                                className="px-6 py-3 bg-amber-primary hover:bg-amber-secondary text-bg rounded-xl text-xs font-bold transition-all shadow-lg shadow-amber-primary/20 flex items-center gap-2 active:scale-[0.98] cursor-pointer"
                               >
-                                Explore Projects <ChevronRight size={16} />
+                                <span>Explore Projects</span>
+                                <ChevronRight size={15} />
                               </button>
-                              <div className="flex -space-x-3">
-                                {users.slice(0, 4).map((u, i) => (
-                                  <div
-                                    key={i}
-                                    className="w-10 h-10 rounded-full border-4 border-surface bg-surface-3 flex items-center justify-center text-xs font-bold text-text-dim overflow-hidden"
-                                  >
-                                    {u.profilePicture ? (
-                                      <img
-                                        src={u.profilePicture}
-                                        className="w-full h-full object-cover"
-                                      />
-                                    ) : (
-                                      u.name[0]
-                                    )}
-                                  </div>
-                                ))}
-                                <div className="w-10 h-10 rounded-full border-4 border-surface bg-surface-2 flex items-center justify-center text-[10px] font-bold text-text-dim">
-                                  +{users.length > 4 ? users.length - 4 : 0}
+
+                              <div className="flex items-center gap-2 bg-surface/60 border border-border-bright px-3 py-1.5 rounded-xl backdrop-blur-sm">
+                                <div className="flex -space-x-2.5">
+                                  {users.slice(0, 4).map((u, i) => (
+                                    <div
+                                      key={i}
+                                      className="w-8 h-8 rounded-full border-2 border-surface bg-surface-3 flex items-center justify-center text-[10px] font-bold text-text-primary overflow-hidden shadow-sm"
+                                      title={u.name}
+                                    >
+                                      {u.profilePicture ? (
+                                        <img
+                                          src={u.profilePicture}
+                                          alt={u.name}
+                                          className="w-full h-full object-cover"
+                                        />
+                                      ) : (
+                                        u.name[0]
+                                      )}
+                                    </div>
+                                  ))}
+                                  {users.length > 4 && (
+                                    <div className="w-8 h-8 rounded-full border-2 border-surface bg-amber-primary/15 text-amber-primary flex items-center justify-center text-[9px] font-bold font-mono shadow-sm">
+                                      +{users.length - 4}
+                                    </div>
+                                  )}
                                 </div>
+                                <span className="text-[10px] font-mono text-text-dim uppercase tracking-wider pl-1">
+                                  Team Live
+                                </span>
                               </div>
                             </div>
                           </div>
 
-                          <div className="grid grid-cols-2 gap-4 w-full md:w-auto">
-                            <div className="bg-surface/40 border border-border-bright p-6 rounded-2xl flex flex-col items-center text-center gap-2">
-                              <div className="text-2xl font-serif font-bold text-text-primary">
-                                {stats.liveUsers}
+                          <div className="grid grid-cols-2 sm:grid-cols-2 gap-3 w-full lg:w-auto">
+                            <div className="bg-surface/70 border border-border-bright p-5 rounded-2xl flex flex-col items-center text-center gap-1.5 shadow-lg backdrop-blur-sm">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                                <span className="text-2xl sm:text-3xl font-bold font-sans text-text-primary">
+                                  {stats.liveUsers}
+                                </span>
                               </div>
-                              <div className="text-[9px] text-text-dim uppercase tracking-widest font-bold">
+                              <div className="text-[10px] font-mono text-text-dim uppercase tracking-wider font-bold">
                                 Active Users
                               </div>
-                              <div className="w-8 h-1 bg-green-500 rounded-full mt-1 animate-pulse" />
                             </div>
-                            <div className="bg-surface/40 border border-border-bright p-6 rounded-2xl flex flex-col items-center text-center gap-2">
-                              <div className="text-2xl font-serif font-bold text-text-primary">
-                                {stats.totalProperties}
+
+                            <div className="bg-surface/70 border border-border-bright p-5 rounded-2xl flex flex-col items-center text-center gap-1.5 shadow-lg backdrop-blur-sm">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-amber-primary" />
+                                <span className="text-2xl sm:text-3xl font-bold font-sans text-text-primary">
+                                  {stats.totalProperties}
+                                </span>
                               </div>
-                              <div className="text-[9px] text-text-dim uppercase tracking-widest font-bold">
-                                Listings
+                              <div className="text-[10px] font-mono text-text-dim uppercase tracking-wider font-bold">
+                                Total Listings
                               </div>
-                              <div className="w-8 h-1 bg-amber-primary rounded-full mt-1" />
                             </div>
                           </div>
                         </div>
@@ -10312,11 +12994,11 @@ export default function App() {
                             initial={{ opacity: 0, y: 15 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: 15 }}
-                            className="bg-amber-primary/5 border border-amber-primary/20 rounded-3xl p-5 flex flex-col md:flex-row items-center justify-between gap-4 select-none relative overflow-hidden"
+                            className="bg-amber-primary/5 border border-amber-primary/20 rounded-2xl p-5 flex flex-col md:flex-row items-center justify-between gap-4 select-none relative overflow-hidden backdrop-blur-sm"
                           >
-                            <div className="absolute top-0 right-0 w-32 h-32 bg-amber-primary/5 rounded-full -mr-16 -mt-16 blur-[20px]" />
+                            <div className="absolute top-0 right-0 w-32 h-32 bg-amber-primary/10 rounded-full -mr-16 -mt-16 blur-2xl pointer-events-none" />
                             <div className="relative z-10 flex items-center gap-4 text-left">
-                              <div className="w-12 h-12 rounded-2xl bg-amber-primary/10 border border-amber-primary/20 flex items-center justify-center text-amber-primary shrink-0 shadow-lg shadow-amber-primary/5">
+                              <div className="w-11 h-11 rounded-xl bg-amber-primary/15 border border-amber-primary/30 flex items-center justify-center text-amber-primary shrink-0 shadow-lg shadow-amber-primary/10">
                                 <Smartphone
                                   size={22}
                                   className="animate-pulse"
@@ -10326,11 +13008,8 @@ export default function App() {
                                 <h4 className="text-sm font-bold text-text-primary">
                                   Install pySync App on Android
                                 </h4>
-                                <p className="text-[11px] text-text-dim mt-0.5 leading-relaxed max-w-2xl">
-                                  Enjoy a polished fullscreen workspace, instant
-                                  touch-screen response, persistent offline
-                                  login sessions, and native Android home-screen
-                                  integration.
+                                <p className="text-xs text-text-dim mt-0.5 leading-relaxed max-w-2xl">
+                                  Enjoy a polished fullscreen workspace, instant touch-screen response, persistent offline sessions, and native Android home-screen integration.
                                 </p>
                               </div>
                             </div>
@@ -10343,7 +13022,7 @@ export default function App() {
                               </button>
                               <button
                                 onClick={() => setIsInstallable(false)}
-                                className="px-3 py-2 text-text-dim hover:text-text-primary rounded-xl hover:bg-surface-2 transition-colors text-xs font-bold"
+                                className="px-3 py-2 text-text-dim hover:text-text-primary rounded-xl hover:bg-surface-2 transition-colors text-xs font-bold cursor-pointer"
                               >
                                 Dismiss
                               </button>
@@ -10352,8 +13031,8 @@ export default function App() {
                         )}
                       </AnimatePresence>
 
-                      {/* KPI Grid */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                      {/* Primary KPI Grid */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
                         <KpiCard
                           label="Total Projects"
                           value={stats.total}
@@ -10381,14 +13060,15 @@ export default function App() {
                         <KpiCard
                           label="Media Assets"
                           value={stats.folders}
-                          sub="Cloud Storage"
+                          sub="Media Library"
                           icon={FolderOpen}
                           color="green"
                         />
                       </div>
 
+                      {/* Admin Secondary Stats Strip */}
                       {user?.role === "admin" && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
                           <KpiCard
                             label="Live Users"
                             value={stats.liveUsers}
@@ -10427,82 +13107,150 @@ export default function App() {
                         </div>
                       )}
 
+                      {/* Recent Projects Section */}
                       <DashboardSection
                         title="Recent Projects"
                         icon={Building2}
                         action={
                           <button
                             onClick={() => setActiveTab("projects")}
-                            className="text-[10px] text-amber-primary hover:underline uppercase tracking-widest font-bold"
+                            className="text-xs text-amber-primary hover:underline uppercase tracking-wider font-mono font-bold flex items-center gap-1 cursor-pointer"
                           >
-                            View All
+                            <span>Explore All ({projects.length})</span>
+                            <ArrowUpRight size={13} />
                           </button>
                         }
                       >
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
-                          {projects.slice(0, 6).map((project, idx) => (
-                            <motion.div
-                              key={project.id}
-                              initial={{ opacity: 0, y: 10 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              transition={{ delay: idx * 0.05 }}
-                              className="bg-surface-2/50 border border-border-bright rounded-xl p-4 hover:border-amber-primary/30 transition-all cursor-pointer group"
-                              onClick={() => {
-                                setSelectedProject(project);
-                                setActiveTab("projects");
-                              }}
-                            >
-                              <div className="flex justify-between items-start mb-2">
-                                <div className="text-[10px] font-mono text-text-dim">
-                                  {project.id.slice(0, 8)}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {projects.slice(0, 6).map((project, idx) => {
+                            const projectAny = project as any;
+                            const firstImage = Array.isArray(project.images) && project.images.length > 0 
+                              ? project.images[0] 
+                              : projectAny.imageUrl || projectAny.coverImage || null;
+                            const priceInCr = (project.price / 10000000).toFixed(2);
+                            const projectTypeLabel = (project.type || project.projectType || "Apartments")
+                              .replace("FLATS", "Apartments")
+                              .replace("Apartment", "Apartments");
+
+                            return (
+                              <motion.div
+                                key={project.id}
+                                initial={{ opacity: 0, y: 12 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: idx * 0.04 }}
+                                className="bg-surface-2/60 border border-border-bright hover:border-amber-primary/50 rounded-2xl p-4 hover:bg-surface-2 transition-all cursor-pointer group shadow-lg flex flex-col justify-between backdrop-blur-md relative overflow-hidden"
+                                onClick={() => {
+                                  setSelectedProject(project);
+                                  setActiveTab("projects");
+                                }}
+                              >
+                                <div className="absolute top-0 right-0 w-28 h-28 bg-amber-primary/5 rounded-full blur-2xl group-hover:scale-125 transition-transform pointer-events-none" />
+                                
+                                <div>
+                                  {/* Top badges & header */}
+                                  <div className="flex justify-between items-center mb-3">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] font-mono font-bold text-text-dim px-2 py-0.5 rounded-lg bg-surface-3/80 border border-border-bright">
+                                        #{project.id.slice(0, 7)}
+                                      </span>
+                                      {project.reraNumber && (
+                                        <span className="text-[9px] font-mono font-bold text-sky-400 bg-sky-500/10 border border-sky-500/25 px-1.5 py-0.5 rounded">
+                                          RERA
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span
+                                      className={`text-[9px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider flex items-center gap-1.5 border shadow-sm ${
+                                        project.status === "Active"
+                                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                                          : project.status === "Sold"
+                                          ? "bg-sky-500/10 text-sky-400 border-sky-500/30"
+                                          : "bg-amber-500/15 text-amber-300 border-amber-500/60 shadow-sm animate-breathe"
+                                      }`}
+                                    >
+                                      <span className={`w-1.5 h-1.5 rounded-full ${project.status === "Active" ? "bg-emerald-400 animate-pulse" : project.status === "Sold" ? "bg-sky-400" : "bg-amber-400 animate-breathe-dot"}`} />
+                                      <span>{project.status}</span>
+                                    </span>
+                                  </div>
+
+                                  {/* Thumbnail & Title */}
+                                  <div className="flex items-start gap-3">
+                                    <div className="w-12 h-12 rounded-xl bg-surface-3 border border-border-bright flex items-center justify-center text-amber-primary shrink-0 overflow-hidden shadow-inner group-hover:border-amber-primary/40 transition-colors">
+                                      {firstImage ? (
+                                        <img 
+                                          src={firstImage} 
+                                          alt={project.title} 
+                                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" 
+                                        />
+                                      ) : (
+                                        <Building2 size={22} className="text-amber-primary/70" />
+                                      )}
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <h4 className="text-sm font-bold text-text-primary group-hover:text-amber-primary transition-colors truncate">
+                                        {project.title}
+                                      </h4>
+                                      <p className="text-[11px] text-text-dim truncate flex items-center gap-1 mt-1">
+                                        <MapPin size={11} className="text-amber-primary shrink-0" />
+                                        <span className="truncate">{project.location || "Prime Location"}</span>
+                                      </p>
+                                    </div>
+                                  </div>
                                 </div>
-                                <div
-                                  className={`text-[8px] px-1.5 py-0.5 rounded font-bold uppercase tracking-widest ${project.status === "Active" ? "bg-green-500/10 text-green-500" : "bg-amber-primary/10 text-amber-primary"}`}
-                                >
-                                  {project.status}
+
+                                {/* Bottom pricing & type footer */}
+                                <div className="mt-4 pt-3 border-t border-border-dim/40 flex justify-between items-center">
+                                  <div className="flex flex-col">
+                                    <span className="text-[9px] text-text-dim uppercase tracking-wider font-mono">Valuation</span>
+                                    <span className="text-sm font-bold text-amber-primary font-mono tracking-tight">
+                                      ₹{priceInCr} Cr
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[10px] text-text-secondary uppercase tracking-wider font-mono font-medium px-2 py-0.5 rounded-lg bg-surface-3/60 border border-border-bright">
+                                      {projectTypeLabel}
+                                    </span>
+                                    <div className="w-6 h-6 rounded-lg bg-surface-3 flex items-center justify-center text-text-dim group-hover:text-amber-primary group-hover:bg-amber-primary/10 transition-all">
+                                      <ArrowUpRight size={13} />
+                                    </div>
+                                  </div>
                                 </div>
-                              </div>
-                              <h4 className="text-xs font-bold text-text-primary group-hover:text-amber-primary transition-colors truncate">
-                                {project.title}
-                              </h4>
-                              <p className="text-[10px] text-text-dim truncate">
-                                {project.location}
-                              </p>
-                              <div className="mt-3 pt-3 border-t border-border-dim/30 flex justify-between items-center">
-                                <span className="text-[10px] font-bold text-amber-primary">
-                                  ₹{(project.price / 10000000).toFixed(2)} Cr
-                                </span>
-                                <span className="text-[9px] text-text-dim uppercase tracking-widest font-bold">
-                                  {(project.type || project.projectType || "")
-                                    .replace("FLATS", "Apartments")
-                                    .replace("Apartment", "Apartments")}
-                                </span>
-                              </div>
-                            </motion.div>
-                          ))}
+                              </motion.div>
+                            );
+                          })}
                           {projects.length === 0 && (
-                            <div className="col-span-full py-12 text-center">
+                            <div className="col-span-full py-12 text-center bg-surface-2/30 rounded-2xl border border-dashed border-border-bright">
                               <Building2
-                                size={32}
-                                className="text-text-dim/20 mx-auto mb-2"
+                                size={36}
+                                className="text-text-dim/40 mx-auto mb-2"
                               />
-                              <p className="text-xs text-text-dim italic">
-                                No projects found in database.
+                              <p className="text-xs text-text-dim font-medium">
+                                No projects recorded in database yet.
                               </p>
                             </div>
                           )}
                         </div>
                       </DashboardSection>
 
+                      {/* Project Analytics Section */}
                       <DashboardSection
-                        title="Project Analytics"
+                        title="Project Analytics & Distribution"
                         icon={BarChartIcon}
                       >
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 p-6 bg-surface-2/20 rounded-2xl">
-                          <div className="flex flex-col items-center bg-surface border border-border-dim rounded-2xl p-6 shadow-sm hover:border-amber-primary/30 transition-all">
-                            <h4 className="text-[10px] font-black text-text-secondary uppercase tracking-[0.2em] mb-6">
-                              Listing Status Breakdown
-                            </h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          {/* Listing Status Breakdown */}
+                          <div className="flex flex-col items-center bg-surface-2/60 border border-border-bright rounded-2xl p-5 shadow-lg backdrop-blur-md">
+                            <div className="w-full flex items-center justify-between mb-4 pb-2 border-b border-border-dim/40">
+                              <div>
+                                <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider font-mono flex items-center gap-2">
+                                  <span>Listing Status Breakdown</span>
+                                </h4>
+                                <p className="text-[10px] text-text-dim mt-0.5">Inventory distribution across lifecycle stages</p>
+                              </div>
+                              <span className="text-[10px] font-mono font-bold text-amber-primary bg-amber-primary/10 border border-amber-primary/20 px-2 py-0.5 rounded-md">
+                                {projects.length} Total
+                              </span>
+                            </div>
                             <div className="w-full h-64">
                               <ResponsiveContainer width="100%" height="100%">
                                 <BarChart
@@ -10522,67 +13270,87 @@ export default function App() {
                                     {
                                       name: "Pending",
                                       count: projects.filter(
-                                        (p) => p.status === "PENDING_DELETE",
+                                        (p) => p.status === "PENDING_DELETE" || p.status === "Pending",
                                       ).length,
                                     },
                                   ]}
                                 >
+                                  <defs>
+                                    <linearGradient id="barAmberGrad" x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="0%" stopColor="#F59E0B" stopOpacity={0.9} />
+                                      <stop offset="100%" stopColor="#D97706" stopOpacity={0.4} />
+                                    </linearGradient>
+                                    <linearGradient id="barEmeraldGrad" x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="0%" stopColor="#10B981" stopOpacity={0.9} />
+                                      <stop offset="100%" stopColor="#059669" stopOpacity={0.4} />
+                                    </linearGradient>
+                                    <linearGradient id="barPurpleGrad" x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="0%" stopColor="#8B5CF6" stopOpacity={0.9} />
+                                      <stop offset="100%" stopColor="#6D28D9" stopOpacity={0.4} />
+                                    </linearGradient>
+                                  </defs>
                                   <CartesianGrid
                                     strokeDasharray="3 3"
-                                    stroke="currentColor"
-                                    className="text-border-dim/30"
+                                    stroke="rgba(255, 255, 255, 0.06)"
                                     vertical={false}
                                   />
                                   <XAxis
                                     dataKey="name"
                                     stroke="currentColor"
-                                    className="text-text-dim text-[9px] font-bold"
+                                    className="text-text-dim text-[10px] font-bold"
                                     tickLine={false}
                                     axisLine={false}
                                   />
                                   <YAxis
                                     stroke="currentColor"
-                                    className="text-text-dim text-[9px] font-bold"
+                                    className="text-text-dim text-[10px] font-bold"
                                     tickLine={false}
                                     axisLine={false}
                                     allowDecimals={false}
                                   />
                                   <Tooltip
                                     cursor={{
-                                      fill: "var(--amber-primary)",
-                                      opacity: 0.05,
+                                      fill: "rgba(245, 158, 11, 0.06)",
                                     }}
                                     contentStyle={{
-                                      backgroundColor: "var(--surface-color)",
-                                      borderColor: "var(--border-dim)",
-                                      borderRadius: "12px",
+                                      backgroundColor: "#13151D",
+                                      borderColor: "rgba(255, 255, 255, 0.15)",
+                                      borderRadius: "14px",
                                       fontSize: "12px",
-                                      boxShadow:
-                                        "0 10px 15px -3px rgba(0, 0, 0, 0.5)",
+                                      boxShadow: "0 10px 30px -5px rgba(0, 0, 0, 0.8)",
                                     }}
                                     itemStyle={{
-                                      color: "var(--text-primary)",
+                                      color: "#F3F4F6",
                                       fontWeight: "bold",
                                     }}
                                   />
                                   <Bar
                                     dataKey="count"
-                                    radius={[6, 6, 0, 0]}
-                                    maxBarSize={40}
+                                    radius={[8, 8, 0, 0]}
+                                    maxBarSize={48}
                                   >
-                                    <Cell fill="#F59E0B" />
-                                    <Cell fill="#10B981" />
-                                    <Cell fill="#8B5CF6" />
+                                    <Cell fill="url(#barAmberGrad)" />
+                                    <Cell fill="url(#barEmeraldGrad)" />
+                                    <Cell fill="url(#barPurpleGrad)" />
                                   </Bar>
                                 </BarChart>
                               </ResponsiveContainer>
                             </div>
                           </div>
 
-                          <div className="flex flex-col items-center bg-surface border border-border-dim rounded-2xl p-6 shadow-sm hover:border-blue-500/30 transition-all">
-                            <h4 className="text-[10px] font-black text-text-secondary uppercase tracking-[0.2em] mb-6">
-                              Possession Timelines
-                            </h4>
+                          {/* Possession Timelines */}
+                          <div className="flex flex-col items-center bg-surface-2/60 border border-border-bright rounded-2xl p-5 shadow-lg backdrop-blur-md">
+                            <div className="w-full flex items-center justify-between mb-4 pb-2 border-b border-border-dim/40">
+                              <div>
+                                <h4 className="text-xs font-bold text-text-primary uppercase tracking-wider font-mono">
+                                  Possession Timelines
+                                </h4>
+                                <p className="text-[10px] text-text-dim mt-0.5">Construction and handover readiness ratio</p>
+                              </div>
+                              <span className="text-[10px] font-mono font-bold text-sky-400 bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded-md">
+                                Lifecycle Mix
+                              </span>
+                            </div>
                             <div className="w-full h-64">
                               <ResponsiveContainer width="100%" height="100%">
                                 <PieChart>
@@ -10607,41 +13375,39 @@ export default function App() {
                                       {
                                         name: "New Launch",
                                         count: projects.filter(
-                                          (p) =>
-                                            p.possessionStatus === "New Launch",
+                                          (p) => p.possessionStatus === "New Launch",
                                         ).length,
                                       },
                                     ].filter((d) => d.count > 0)}
                                     cx="50%"
                                     cy="50%"
-                                    innerRadius={60}
-                                    outerRadius={80}
-                                    paddingAngle={5}
+                                    innerRadius={58}
+                                    outerRadius={82}
+                                    paddingAngle={6}
                                     dataKey="count"
                                   >
-                                    <Cell fill="#3B82F6" />
+                                    <Cell fill="#38BDF8" />
                                     <Cell fill="#F59E0B" />
                                     <Cell fill="#EC4899" />
                                   </Pie>
                                   <Tooltip
                                     contentStyle={{
-                                      backgroundColor: "var(--surface-color)",
-                                      borderColor: "var(--border-dim)",
-                                      borderRadius: "12px",
+                                      backgroundColor: "#13151D",
+                                      borderColor: "rgba(255, 255, 255, 0.15)",
+                                      borderRadius: "14px",
                                       fontSize: "12px",
-                                      boxShadow:
-                                        "0 10px 15px -3px rgba(0, 0, 0, 0.5)",
+                                      boxShadow: "0 10px 30px -5px rgba(0, 0, 0, 0.8)",
                                     }}
                                     itemStyle={{
-                                      color: "var(--text-primary)",
+                                      color: "#F3F4F6",
                                       fontWeight: "bold",
                                     }}
                                   />
                                   <Legend
                                     wrapperStyle={{
-                                      fontSize: "10px",
+                                      fontSize: "11px",
                                       fontWeight: "bold",
-                                      paddingTop: "20px",
+                                      paddingTop: "14px",
                                     }}
                                   />
                                 </PieChart>
@@ -10651,14 +13417,14 @@ export default function App() {
                         </div>
                       </DashboardSection>
 
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                        <div className="lg:col-span-2 space-y-8">
-                          {user?.role === "admin" ? (
-                            <div className="space-y-8">
-                              {/* Summary Grid for Admin */}
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                      {/* Lower Operations Grid */}
+                      <div className="space-y-6">
+                        {user?.role === "admin" ? (
+                          <div className="space-y-6">
+                            {/* 2-Column Split: Approvals & Team */}
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {/* Approvals Column */}
-                                <div className="space-y-8">
+                                <div>
                                   {approvals.length > 0 ? (
                                     <DashboardSection
                                       title="Pending Approvals"
@@ -10668,13 +13434,14 @@ export default function App() {
                                           onClick={() =>
                                             setActiveTab("approvals")
                                           }
-                                          className="text-[10px] text-amber-primary hover:underline uppercase tracking-widest font-bold"
+                                          className="text-xs text-amber-primary hover:underline uppercase tracking-wider font-mono font-bold flex items-center gap-1 cursor-pointer"
                                         >
-                                          Queue
+                                          <span>Queue ({approvals.length})</span>
+                                          <ArrowUpRight size={13} />
                                         </button>
                                       }
                                     >
-                                      <div className="space-y-3">
+                                      <div className="space-y-2.5">
                                         {approvals
                                           .slice(0, 3)
                                           .map((app, idx) => (
@@ -10683,29 +13450,34 @@ export default function App() {
                                               animate={{ opacity: 1, y: 0 }}
                                               transition={{ delay: idx * 0.05 }}
                                               key={app.id}
-                                              className="flex items-center justify-between p-3.5 bg-surface-2/50 border border-border-bright rounded-xl hover:border-amber-primary/30 transition-all cursor-pointer"
+                                              className="flex items-center justify-between p-3.5 bg-surface-2/60 border border-border-bright rounded-2xl hover:border-amber-primary/40 hover:bg-surface-2 transition-all cursor-pointer shadow-sm group"
                                               onClick={() => {
                                                 setActiveTab("approvals");
                                                 playSound("click");
                                               }}
                                             >
-                                              <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-lg bg-amber-primary/10 flex items-center justify-center text-amber-primary shrink-0">
-                                                  <ShieldCheck size={14} />
+                                              <div className="flex items-center gap-3 min-w-0">
+                                                <div className="w-9 h-9 rounded-xl bg-amber-primary/10 border border-amber-primary/20 flex items-center justify-center text-amber-primary shrink-0 group-hover:scale-105 transition-transform">
+                                                  <ShieldCheck size={16} />
                                                 </div>
                                                 <div className="flex flex-col min-w-0">
-                                                  <span className="text-[10px] font-bold text-text-primary uppercase tracking-wider truncate">
+                                                  <span className="text-xs font-bold text-text-primary group-hover:text-amber-primary transition-colors uppercase tracking-wider truncate">
                                                     {app.type?.replace(
                                                       /_/g,
                                                       " ",
                                                     )}
                                                   </span>
-                                                  <span className="text-[9px] text-text-dim truncate">
-                                                    By {app.requestedBy}
+                                                  <span className="text-[10px] text-text-dim truncate mt-0.5">
+                                                    Requested by <strong className="text-text-secondary">{app.requestedBy}</strong>
                                                   </span>
                                                 </div>
                                               </div>
-                                              <div className="w-2 h-2 rounded-full bg-amber-primary animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.4)] shrink-0" />
+                                              <div className="flex items-center gap-2 shrink-0">
+                                                <span className="text-[9px] font-mono font-bold text-amber-300 bg-amber-500/15 border border-amber-500/50 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 shadow-sm animate-breathe">
+                                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-breathe-dot" />
+                                                  <span>Pending Approval</span>
+                                                </span>
+                                              </div>
                                             </motion.div>
                                           ))}
                                       </div>
@@ -10715,69 +13487,72 @@ export default function App() {
                                       title="Approvals"
                                       icon={ShieldCheck}
                                     >
-                                      <div className="h-full flex flex-col items-center justify-center py-10 bg-surface-2/30 rounded-2xl border border-dashed border-border-dim/50 border-spacing-4">
-                                        <div className="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center text-green-500 mb-2">
+                                      <div className="h-full flex flex-col items-center justify-center py-8 bg-surface-2/30 rounded-2xl border border-dashed border-border-bright">
+                                        <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400 mb-2 shadow-sm">
                                           <Check size={20} />
                                         </div>
-                                        <span className="text-[9px] font-black uppercase tracking-[0.2em] text-text-dim">
-                                          Queue Clear
+                                        <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-text-dim">
+                                          Workflow Queue Clear
                                         </span>
                                       </div>
                                     </DashboardSection>
                                   )}
                                 </div>
 
-                                {/* Users Column */}
-                                <div className="space-y-8">
+                                {/* Active Team Column */}
+                                <div>
                                   <DashboardSection
                                     title="Active Team"
                                     icon={UsersIcon}
                                     action={
                                       <button
                                         onClick={() => setActiveTab("users")}
-                                        className="text-[10px] text-amber-primary hover:underline uppercase tracking-widest font-bold"
+                                        className="text-xs text-amber-primary hover:underline uppercase tracking-wider font-mono font-bold flex items-center gap-1 cursor-pointer"
                                       >
-                                        Team
+                                        <span>Roster ({users.length})</span>
+                                        <ArrowUpRight size={13} />
                                       </button>
                                     }
                                   >
-                                    <div className="space-y-3">
+                                    <div className="space-y-2.5">
                                       {users.slice(0, 3).map((u, idx) => (
                                         <motion.div
                                           initial={{ opacity: 0, x: 10 }}
                                           animate={{ opacity: 1, x: 0 }}
                                           transition={{ delay: idx * 0.05 }}
                                           key={u.id}
-                                          className="flex items-center justify-between p-3.5 rounded-xl border border-border-dim/30 hover:border-amber-primary/30 hover:bg-surface-2/50 transition-all cursor-pointer group"
+                                          className="flex items-center justify-between p-3 rounded-2xl border border-border-bright bg-surface-2/40 hover:border-amber-primary/40 hover:bg-surface-2/70 transition-all cursor-pointer group shadow-sm"
                                           onClick={() => {
                                             setActiveTab("users");
                                             playSound("click");
                                           }}
                                         >
-                                          <div className="flex items-center gap-3">
+                                          <div className="flex items-center gap-3 min-w-0">
                                             {u.profilePicture ? (
                                               <img
                                                 src={u.profilePicture}
                                                 alt={u.name}
-                                                className="w-8 h-8 rounded-full object-cover border border-border-bright"
+                                                className="w-9 h-9 rounded-full object-cover border border-border-bright shadow-sm"
                                               />
                                             ) : (
-                                              <div className="w-8 h-8 rounded-full bg-surface-3 flex items-center justify-center text-[9px] font-black text-text-primary">
+                                              <div className="w-9 h-9 rounded-full bg-surface-3 border border-border-bright flex items-center justify-center text-[11px] font-bold text-amber-primary shadow-sm">
                                                 {u.name[0]}
                                               </div>
                                             )}
                                             <div className="flex flex-col min-w-0">
-                                              <span className="text-[11px] font-bold text-text-primary group-hover:text-amber-primary transition-colors truncate">
+                                              <span className="text-xs font-bold text-text-primary group-hover:text-amber-primary transition-colors truncate">
                                                 {u.name}
                                               </span>
-                                              <span className="text-[8px] text-text-dim uppercase tracking-widest font-bold">
+                                              <span className="text-[9px] text-text-dim uppercase tracking-wider font-mono mt-0.5">
                                                 {u.role}
                                               </span>
                                             </div>
                                           </div>
-                                          <div
-                                            className={`w-1.5 h-1.5 rounded-full ${idx < 2 ? "bg-green-500" : "bg-surface-3"}`}
-                                          />
+                                          <div className="flex items-center gap-2">
+                                            <div
+                                              className={`w-2 h-2 rounded-full ${idx < 2 ? "bg-emerald-400 animate-pulse shadow-[0_0_6px_rgba(52,211,153,0.8)]" : "bg-surface-3"}`}
+                                            />
+                                          </div>
                                         </motion.div>
                                       ))}
                                     </div>
@@ -10785,47 +13560,48 @@ export default function App() {
                                 </div>
                               </div>
 
-                              {/* Audit Logs Full Width */}
+                              {/* Recent Audit Logs Stream */}
                               <DashboardSection
                                 title="Recent Audit Logs"
                                 icon={Activity}
                                 action={
                                   <button
                                     onClick={() => setActiveTab("logs")}
-                                    className="text-[10px] text-amber-primary hover:underline uppercase tracking-widest font-bold"
+                                    className="text-xs text-amber-primary hover:underline uppercase tracking-wider font-mono font-bold flex items-center gap-1 cursor-pointer"
                                   >
-                                    View History
+                                    <span>Full History</span>
+                                    <ArrowUpRight size={13} />
                                   </button>
                                 }
                               >
-                                <div className="space-y-1">
+                                <div className="space-y-1.5">
                                   {logs.slice(0, 5).map((log, idx) => (
                                     <motion.div
                                       initial={{ opacity: 0, x: -10 }}
                                       animate={{ opacity: 1, x: 0 }}
-                                      transition={{ delay: idx * 0.05 }}
+                                      transition={{ delay: idx * 0.04 }}
                                       key={log.id}
-                                      className="flex items-center justify-between p-4 rounded-xl hover:bg-surface-2/50 transition-colors group border-b border-border-dim/30 last:border-0 cursor-pointer"
+                                      className="flex items-center justify-between p-3 rounded-xl bg-surface-2/30 hover:bg-surface-2/70 transition-all group border border-transparent hover:border-border-bright cursor-pointer"
                                       onClick={() => {
                                         setActiveTab("logs");
                                         playSound("click");
                                       }}
                                     >
-                                      <div className="flex items-center gap-4">
-                                        <div className="w-8 h-8 rounded-lg bg-surface-3 flex items-center justify-center text-text-dim group-hover:text-amber-primary transition-colors">
+                                      <div className="flex items-center gap-3 min-w-0">
+                                        <div className="w-8 h-8 rounded-xl bg-surface-3 border border-border-bright flex items-center justify-center text-text-dim group-hover:text-amber-primary transition-colors shrink-0">
                                           <Activity size={14} />
                                         </div>
                                         <div className="flex flex-col min-w-0">
-                                          <span className="text-xs font-bold text-text-primary group-hover:text-amber-primary transition-colors uppercase tracking-wider">
+                                          <span className="text-xs font-bold text-text-primary group-hover:text-amber-primary transition-colors uppercase tracking-wider truncate">
                                             {log.action?.replace(/_/g, " ")}
                                           </span>
-                                          <span className="text-[10px] text-text-dim italic line-clamp-1">
+                                          <span className="text-[11px] text-text-dim line-clamp-1">
                                             {log.summary}
                                           </span>
                                         </div>
                                       </div>
-                                      <div className="text-right shrink-0">
-                                        <div className="text-[10px] text-text-secondary font-bold">
+                                      <div className="text-right shrink-0 pl-3">
+                                        <div className="text-[11px] text-text-secondary font-bold font-mono">
                                           {log.user}
                                         </div>
                                         <div className="text-[9px] text-text-dim font-mono">
@@ -10840,13 +13616,13 @@ export default function App() {
                                     </motion.div>
                                   ))}
                                   {logs.length === 0 && (
-                                    <div className="flex flex-col items-center justify-center py-10 text-center">
+                                    <div className="flex flex-col items-center justify-center py-8 text-center bg-surface-2/20 rounded-xl border border-dashed border-border-bright">
                                       <Activity
-                                        size={32}
-                                        className="text-text-dim/20 mb-2"
+                                        size={28}
+                                        className="text-text-dim/40 mb-2"
                                       />
                                       <p className="text-xs text-text-dim italic">
-                                        No activity recorded yet.
+                                        No recent activity recorded.
                                       </p>
                                     </div>
                                   )}
@@ -10854,51 +13630,66 @@ export default function App() {
                               </DashboardSection>
                             </div>
                           ) : (
-                            <div className="relative overflow-hidden rounded-3xl bg-surface border border-border-dim p-12 flex flex-col items-center justify-center text-center gap-6 min-h-[400px]">
-                              <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-amber-primary/5 to-transparent pointer-events-none" />
-                              <div className="p-6 bg-amber-primary/10 rounded-full text-amber-primary animate-bounce">
-                                <LayoutDashboard size={48} />
+                            /* Non-Admin Executive Agent Launchpad */
+                            <div className="space-y-6">
+                              <div className="relative overflow-hidden rounded-3xl bg-surface-2/60 border border-border-bright p-8 shadow-xl backdrop-blur-md">
+                                <div className="absolute top-0 right-0 w-64 h-64 bg-amber-primary/10 rounded-full blur-3xl pointer-events-none" />
+                                <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+                                  <div className="space-y-2">
+                                    <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-amber-primary/10 border border-amber-primary/20 text-[10px] font-mono font-bold text-amber-primary uppercase tracking-widest">
+                                      <span>Agent Workspace</span>
+                                    </div>
+                                    <h3 className="text-2xl font-serif font-bold text-text-primary">
+                                      Welcome to PySync Command
+                                    </h3>
+                                    <p className="text-xs text-text-secondary max-w-md leading-relaxed">
+                                      Your dedicated real estate operations console. Access listings, inspect floor plans, manage resale portfolios, and collaborate across assets.
+                                    </p>
+                                  </div>
+                                  <button
+                                    onClick={() => setActiveTab("projects")}
+                                    className="px-5 py-3 bg-amber-primary hover:bg-amber-secondary text-bg font-bold rounded-xl text-xs transition-all flex items-center gap-2 cursor-pointer shadow-lg shadow-amber-primary/20"
+                                  >
+                                    <Building2 size={16} />
+                                    <span>Browse Inventory</span>
+                                  </button>
+                                </div>
                               </div>
-                              <div className="space-y-2 relative z-10">
-                                <h3 className="text-2xl font-serif font-bold text-text-primary">
-                                  Welcome to PySync
-                                </h3>
-                                <p className="text-sm text-text-secondary max-w-xs mx-auto leading-relaxed">
-                                  Your personalized real estate command center.
-                                  Use the sidebar to navigate through projects,
-                                  resale listings, and media assets.
-                                </p>
+
+                              {/* Agent Quick Launch Actions */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <button
+                                  onClick={() => setActiveTab("projects")}
+                                  className="p-5 rounded-2xl border border-border-bright bg-surface-2/40 hover:bg-surface-2/80 hover:border-amber-primary/40 transition-all text-left group cursor-pointer shadow-md"
+                                >
+                                  <div className="w-10 h-10 rounded-xl bg-amber-primary/10 border border-amber-primary/20 flex items-center justify-center text-amber-primary mb-3 group-hover:scale-110 transition-transform">
+                                    <Building2 size={20} />
+                                  </div>
+                                  <h4 className="text-sm font-bold text-text-primary group-hover:text-amber-primary transition-colors">
+                                    Browse Project Catalog
+                                  </h4>
+                                  <p className="text-xs text-text-dim mt-1 leading-relaxed">
+                                    Inspect all verified master developments, floor plans, and pricing sheets.
+                                  </p>
+                                </button>
+
+                                <button
+                                  onClick={() => setActiveTab("resale")}
+                                  className="p-5 rounded-2xl border border-border-bright bg-surface-2/40 hover:bg-surface-2/80 hover:border-amber-primary/40 transition-all text-left group cursor-pointer shadow-md"
+                                >
+                                  <div className="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 mb-3 group-hover:scale-110 transition-transform">
+                                    <Home size={20} />
+                                  </div>
+                                  <h4 className="text-sm font-bold text-text-primary group-hover:text-amber-primary transition-colors">
+                                    Resale Listings
+                                  </h4>
+                                  <p className="text-xs text-text-dim mt-1 leading-relaxed">
+                                    Search secondary market inventory, direct owner listings, and verified plots.
+                                  </p>
+                                </button>
                               </div>
-                              <button
-                                onClick={() => setActiveTab("projects")}
-                                className="px-8 py-3 bg-surface-2 border border-border-bright rounded-xl text-xs font-bold text-text-primary hover:border-amber-primary transition-all relative z-10"
-                              >
-                                Get Started
-                              </button>
                             </div>
                           )}
-                        </div>
-
-                        <div className="space-y-8">
-                          <div className="bg-gradient-to-br from-amber-primary to-amber-secondary p-6 rounded-2xl text-bg shadow-xl shadow-amber-primary/20 relative overflow-hidden group">
-                            <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 blur-2xl group-hover:scale-150 transition-transform duration-700" />
-                            <div className="relative z-10 space-y-4">
-                              <div className="p-2 bg-white/20 rounded-lg w-fit">
-                                <ShieldCheck size={20} />
-                              </div>
-                              <div className="space-y-1">
-                                <h4 className="text-sm font-bold uppercase tracking-wider">
-                                  Pro Tip
-                                </h4>
-                                <p className="text-[11px] leading-relaxed opacity-90">
-                                  Use the global search (⌘+K) to quickly find
-                                  any project or resale listing across all
-                                  buckets.
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
                       </div>
                     </motion.div>
                   )}
@@ -10911,467 +13702,471 @@ export default function App() {
                       animate={{ opacity: 1, x: 0 }}
                       className="space-y-6 w-full max-w-none"
                     >
-                      <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between bg-surface p-6 border border-border-dim rounded-2xl shadow-sm w-full">
-                        <div className="flex flex-wrap gap-6 items-center">
-                          <div className="flex items-center gap-3 bg-surface-2 p-1 rounded-xl border border-border-bright">
-                            <button
-                              onClick={() => setViewMode("grid")}
-                              className={`p-2 rounded-lg transition-all ${viewMode === "grid" ? "bg-amber-primary text-bg shadow-lg shadow-amber-primary/20" : "text-text-dim hover:text-text-primary"}`}
-                            >
-                              <LayoutGrid size={18} />
-                            </button>
-                            <button
-                              onClick={() => setViewMode("table")}
-                              className={`p-2 rounded-lg transition-all ${viewMode === "table" ? "bg-amber-primary text-bg shadow-lg shadow-amber-primary/20" : "text-text-dim hover:text-text-primary"}`}
-                            >
-                              <List size={18} />
-                            </button>
-                            <button
-                              onClick={() => setViewMode("map")}
-                              className={`p-2 rounded-lg transition-all ${viewMode === "map" ? "bg-amber-primary text-bg shadow-lg shadow-amber-primary/20" : "text-text-dim hover:text-text-primary"}`}
-                            >
-                              <MapPin size={18} />
-                            </button>
-                          </div>
-
-                          <div className="h-8 w-px bg-border-dim hidden lg:block" />
-
-                          <div className="flex items-center gap-3">
-                            <span className="text-[10px] text-text-dim uppercase tracking-widest font-black">
-                              Status
+                      <div className="bg-surface/70 backdrop-blur-md border border-border-dim/40 rounded-3xl p-5 shadow-lg relative z-30 w-full space-y-4">
+                        <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-amber-primary/30 to-transparent pointer-events-none" />
+                        
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-border-dim/30">
+                          <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-amber-primary animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.5)]" />
+                            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-text-primary">
+                              Project Inventory Filter Console
                             </span>
-                            <div className="flex flex-wrap gap-1.5">
-                              {[
-                                "All",
-                                "Active",
-                                "Sold",
-                                "Pending",
-                                "Pending Approval",
-                                "PENDING_DELETE",
-                              ].map((status) => (
-                                <button
-                                  key={status}
-                                  onClick={() => toggleStatusFilter(status)}
-                                  className={`px-3 py-1.5 rounded-lg text-[10px] border transition-all font-bold uppercase tracking-wider ${
-                                    statusFilter.includes(status)
-                                      ? "bg-amber-primary border-amber-primary text-bg shadow-md shadow-amber-primary/10"
-                                      : "bg-surface-2 border-border-bright text-text-dim hover:border-amber-primary/50"
-                                  }`}
-                                >
-                                  {status === "PENDING_DELETE"
-                                    ? "Del Req"
-                                    : status === "Pending Approval"
-                                      ? "Approvals Pending"
-                                      : status}
-                                </button>
-                              ))}
-                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 text-[10px] font-mono text-text-dim">
+                            <span className="font-bold text-text-secondary">{projects.filter(matchesProjectFilters).length}</span>
+                            <span>/</span>
+                            <span>{projects.length} Total Projects</span>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-4 w-full lg:w-auto">
-                          <div
-                            className="flex-1 lg:flex-none relative"
-                            onMouseLeave={() => setIsSortDropdownOpen(false)}
-                          >
+                        <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between w-full">
+                          <div className="flex flex-wrap gap-4 items-center w-full lg:w-auto">
+                            {/* View Mode */}
+                            <div className="hidden md:flex items-center gap-1.5 bg-surface-2 p-1 rounded-xl border border-border-bright">
+                              <button
+                                onClick={() => {
+                                  setViewMode("grid");
+                                  playSound("click");
+                                }}
+                                className={`p-2 rounded-lg transition-all flex items-center gap-1.5 ${viewMode === "grid" ? "bg-amber-primary text-bg shadow-md shadow-amber-primary/25 font-bold" : "text-text-dim hover:text-text-primary hover:bg-surface-3/50"}`}
+                                title="Grid View (Press 'G')"
+                              >
+                                <LayoutGrid size={16} />
+                                <span className="hidden xl:inline text-[9px] font-mono px-1 py-0.2 rounded bg-black/20 text-text-secondary uppercase">G</span>
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setViewMode("table");
+                                  playSound("click");
+                                }}
+                                className={`p-2 rounded-lg transition-all flex items-center gap-1.5 ${viewMode === "table" ? "bg-amber-primary text-bg shadow-md shadow-amber-primary/25 font-bold" : "text-text-dim hover:text-text-primary hover:bg-surface-3/50"}`}
+                                title="Table View (Press 'T')"
+                              >
+                                <List size={16} />
+                                <span className="hidden xl:inline text-[9px] font-mono px-1 py-0.2 rounded bg-black/20 text-text-secondary uppercase">T</span>
+                              </button>
+                            </div>
+
+                            <div className="h-6 w-px bg-border-dim hidden md:block" />
+
+                            {/* Status Filter */}
+                            <div className="flex items-center gap-2 w-full sm:w-auto">
+                              <span className="text-[9px] text-text-dim uppercase tracking-widest font-black shrink-0">
+                                Status:
+                              </span>
+                              <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
+                                {[
+                                  "All",
+                                  "Active",
+                                  "Sold",
+                                  "Pending",
+                                  "PENDING_DELETE",
+                                ].map((status) => {
+                                  const isActive = statusFilter.includes(status);
+                                  return (
+                                    <button
+                                      key={status}
+                                      onClick={() => toggleStatusFilter(status)}
+                                      className={`flex-1 sm:flex-none px-2.5 py-1.5 rounded-lg text-[9px] border transition-all font-black uppercase tracking-wider flex items-center justify-center gap-1 ${
+                                        isActive
+                                          ? "bg-amber-primary border-amber-primary text-bg shadow-md"
+                                          : "bg-surface-2 border-border-bright text-text-dim hover:border-amber-primary/50 hover:bg-surface-3/30"
+                                      }`}
+                                    >
+                                      {status === "Active" && (
+                                        <span className={`w-1 h-1 rounded-full ${isActive ? 'bg-bg' : 'bg-emerald-500 animate-pulse'}`} />
+                                      )}
+                                      <span>
+                                        {status === "PENDING_DELETE"
+                                          ? "Del Req"
+                                          : status}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Bottom Row on Mobile / Right side on Desktop: Sort, Export & Smart Filters */}
+                          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2.5 w-full lg:w-auto pt-3 lg:pt-0 border-t lg:border-t-0 border-border-dim/20">
+                            {/* Sort Dropdown */}
+                            <div
+                              className="col-span-2 sm:col-span-1 sm:w-48 relative"
+                              onMouseLeave={() => setIsSortDropdownOpen(false)}
+                            >
+                              <button
+                                onClick={() =>
+                                  setIsSortDropdownOpen(!isSortDropdownOpen)
+                                }
+                                className="w-full bg-surface-2 border border-border-bright rounded-xl px-3 sm:px-4 py-2 text-xs text-text-primary outline-none hover:border-amber-primary font-bold flex items-center justify-between transition-colors shadow-sm"
+                              >
+                                <span className="flex items-center gap-1.5 truncate">
+                                  <SlidersHorizontal size={12} className="text-amber-primary shrink-0" />
+                                  <span className="truncate">
+                                    {sortBy === "id"
+                                      ? "Sort: Default"
+                                      : sortBy === "title-asc"
+                                        ? "Title (A-Z)"
+                                        : sortBy === "title-desc"
+                                          ? "Title (Z-A)"
+                                          : sortBy === "price-asc"
+                                            ? "Price: Low to High"
+                                            : sortBy === "price-desc"
+                                              ? "Price: High to Low"
+                                              : sortBy === "location-asc"
+                                                ? "Location (A-Z)"
+                                                : "Sort By"}
+                                  </span>
+                                </span>
+                                <ChevronRight
+                                  size={12}
+                                  className={`rotate-90 transition-transform duration-200 shrink-0 ${isSortDropdownOpen ? "rotate-270" : ""} text-text-dim`}
+                                />
+                              </button>
+                              <AnimatePresence>
+                                {isSortDropdownOpen && (
+                                  <motion.div
+                                    initial={{ opacity: 0, scale: 0.95, y: 5 }}
+                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                    exit={{ opacity: 0, scale: 0.95, y: 5 }}
+                                    transition={{ duration: 0.1 }}
+                                    className="absolute left-0 right-0 sm:right-0 sm:left-auto top-full mt-2 w-full sm:w-48 bg-surface border border-border-dim rounded-xl shadow-xl z-50 p-1.5 space-y-0.5"
+                                  >
+                                    {[
+                                      { value: "id", label: "ID (Default)" },
+                                      { value: "title-asc", label: "Title (A-Z)" },
+                                      { value: "title-desc", label: "Title (Z-A)" },
+                                      { value: "price-asc", label: "Price (Low-High)" },
+                                      { value: "price-desc", label: "Price (High-Low)" },
+                                      { value: "location-asc", label: "Location (A-Z)" },
+                                    ].map((opt) => (
+                                      <button
+                                        key={opt.value}
+                                        onClick={() => {
+                                          setSortBy(opt.value);
+                                          setIsSortDropdownOpen(false);
+                                        }}
+                                        className={`w-full text-left px-3 py-1.5 text-xs rounded-lg transition-colors flex items-center justify-between ${sortBy === opt.value ? "bg-amber-primary text-bg font-black" : "text-text-dim hover:text-text-primary hover:bg-surface-2"}`}
+                                      >
+                                        <span>{opt.label}</span>
+                                        {sortBy === opt.value && <Check size={10} />}
+                                      </button>
+                                    ))}
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </div>
+
+                            {/* Export CSV button */}
+                            <button
+                              onClick={() => {
+                                const filtered = projects.filter(matchesProjectFilters);
+                                const csvContent =
+                                  "data:text/csv;charset=utf-8," +
+                                  "ID,Title,Type,Configuration,Possession,Location,Price,Status,Builder,Area,Bathrooms,Assigned To,Created At\n" +
+                                  filtered
+                                    .map(
+                                      (p) =>
+                                        `${p.id},"${p.title}","${p.type}","${p.configuration}","${p.possessionStatus}","${p.location}",${p.price},"${p.status}","${p.builderName || ""}","${p.area || ""}","${p.bathrooms || ""}","${p.assignedTo || ""}","${p.createdAt || ""}"`,
+                                    )
+                                    .join("\n");
+
+                                const encodedUri = encodeURI(csvContent);
+                                const link = document.createElement("a");
+                                link.setAttribute("href", encodedUri);
+                                link.setAttribute(
+                                  "download",
+                                  `pysync_projects_${new Date().toISOString().split("T")[0]}.csv`,
+                                );
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                              }}
+                              className="col-span-1 sm:col-span-1 flex items-center justify-center gap-1.5 text-[10px] font-black uppercase tracking-widest px-3 sm:px-4 py-2 rounded-xl border border-border-bright bg-surface-2 text-text-dim hover:text-amber-primary hover:border-amber-primary hover:bg-surface-3/30 transition-all shadow-sm"
+                              title="Export filtered projects to CSV"
+                            >
+                              <Download size={12} />
+                              <span>Export</span>
+                            </button>
+
+                            {/* Price Alerts Filter Toggle */}
+                            <button
+                              type="button"
+                              onClick={() => setShowPriceAlertsOnly(!showPriceAlertsOnly)}
+                              className={`col-span-1 sm:col-span-1 flex items-center justify-center gap-1.5 text-[10px] font-black uppercase tracking-widest px-3 sm:px-4 py-2 rounded-xl border transition-all shadow-sm cursor-pointer ${
+                                showPriceAlertsOnly
+                                  ? "bg-amber-primary border-amber-primary text-bg shadow-md shadow-amber-primary/20 font-black"
+                                  : "bg-surface-2 border-border-bright text-text-dim hover:text-amber-primary hover:border-amber-primary/50 hover:bg-surface-3/30"
+                              }`}
+                              title="Filter to projects with active price/status alerts"
+                            >
+                              <Bell size={12} className={showPriceAlertsOnly ? "fill-bg" : ""} />
+                              <span>Alerts</span>
+                              {Object.keys(priceAlerts).length > 0 && (
+                                <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-mono font-bold leading-none ${showPriceAlertsOnly ? 'bg-bg text-amber-primary' : 'bg-amber-primary/20 text-amber-primary'}`}>
+                                  {Object.keys(priceAlerts).length}
+                                </span>
+                              )}
+                            </button>
+
+                            {/* Show Advanced Filters toggle button */}
                             <button
                               onClick={() =>
-                                setIsSortDropdownOpen(!isSortDropdownOpen)
+                                setShowAdvancedFilters(!showAdvancedFilters)
                               }
-                              className="w-full lg:w-48 bg-surface-2 border border-border-bright rounded-xl px-4 py-2 text-xs text-text-primary outline-none hover:border-amber-primary font-bold flex items-center justify-between"
+                              className={`col-span-1 sm:col-span-1 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest px-3 sm:px-4 py-2 rounded-xl border transition-all shadow-sm ${
+                                showAdvancedFilters
+                                  ? "bg-amber-primary border-amber-primary text-bg shadow-md"
+                                  : "bg-surface-2 border-border-bright text-text-dim hover:border-amber-primary/50 hover:bg-surface-3/30"
+                              }`}
                             >
-                              <span>
-                                {sortBy === "id"
-                                  ? "ID (Default)"
-                                  : sortBy === "title-asc"
-                                    ? "Title (A-Z)"
-                                    : sortBy === "title-desc"
-                                      ? "Title (Z-A)"
-                                      : sortBy === "price-asc"
-                                        ? "Price (Low-High)"
-                                        : sortBy === "price-desc"
-                                          ? "Price (High-Low)"
-                                          : sortBy === "location-asc"
-                                            ? "Location (A-Z)"
-                                            : "Sort By"}
-                              </span>
-                              <ChevronRight
-                                size={14}
-                                className={`rotate-90 transition-transform duration-200 ${isSortDropdownOpen ? "rotate-270" : ""} text-text-dim`}
-                              />
+                              <Filter size={12} />
+                              <span>{showAdvancedFilters ? "Hide Panel" : "Smart Filters"}</span>
+                              <AnimatePresence>
+                                {activeProjectFiltersCount > 0 && (
+                                  <motion.span
+                                    initial={{ scale: 0, opacity: 0 }}
+                                    animate={{ scale: 1, opacity: 1 }}
+                                    exit={{ scale: 0, opacity: 0 }}
+                                    className={`flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[9px] font-black rounded-full transition-colors ${
+                                      showAdvancedFilters
+                                        ? "bg-surface-2/90 text-amber-primary"
+                                        : "bg-amber-primary text-bg"
+                                    }`}
+                                  >
+                                    {activeProjectFiltersCount}
+                                  </motion.span>
+                                )}
+                              </AnimatePresence>
                             </button>
-                            <AnimatePresence>
-                              {isSortDropdownOpen && (
-                                <motion.div
-                                  initial={{ opacity: 0, scale: 0.95, y: 5 }}
-                                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                                  exit={{ opacity: 0, scale: 0.95, y: 5 }}
-                                  transition={{ duration: 0.15 }}
-                                  className="absolute right-0 top-full mt-2 w-full md:w-48 bg-surface border border-border-dim rounded-xl shadow-xl z-50 p-1.5 space-y-0.5"
-                                >
-                                  {[
-                                    { value: "id", label: "ID (Default)" },
-                                    {
-                                      value: "title-asc",
-                                      label: "Title (A-Z)",
-                                    },
-                                    {
-                                      value: "title-desc",
-                                      label: "Title (Z-A)",
-                                    },
-                                    {
-                                      value: "price-asc",
-                                      label: "Price (Low-High)",
-                                    },
-                                    {
-                                      value: "price-desc",
-                                      label: "Price (High-Low)",
-                                    },
-                                    {
-                                      value: "location-asc",
-                                      label: "Location (A-Z)",
-                                    },
-                                  ].map((opt) => (
-                                    <button
-                                      key={opt.value}
-                                      onClick={() => {
-                                        setSortBy(opt.value);
-                                        setIsSortDropdownOpen(false);
-                                      }}
-                                      className={`w-full text-left px-3 py-2 text-xs rounded-lg transition-colors ${sortBy === opt.value ? "bg-amber-primary text-bg font-bold" : "text-text-dim hover:text-text-primary hover:bg-surface-2"}`}
-                                    >
-                                      {opt.label}
-                                    </button>
-                                  ))}
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
                           </div>
-                          <button
-                            onClick={() => {
-                              const filtered = projects.filter(
-                                (p) =>
-                                  (builderFilter === "All" ||
-                                    p.builderName === builderFilter) &&
-                                  (p.title
-                                    .toLowerCase()
-                                    .includes(searchQuery.toLowerCase()) ||
-                                    p.type
-                                      .toLowerCase()
-                                      .includes(searchQuery.toLowerCase()) ||
-                                    p.location
-                                      .toLowerCase()
-                                      .includes(searchQuery.toLowerCase())) &&
-                                  (statusFilter.includes("All") ||
-                                    statusFilter.includes(p.status)) &&
-                                  (possessionFilter.includes("All") ||
-                                    possessionFilter.includes(
-                                      p.possessionStatus,
-                                    )) &&
-                                  (assignedToFilter === "All" ||
-                                    p.assignedTo === assignedToFilter) &&
-                                  (bathroomsFilter.length === 0 ||
-                                    (p.bathrooms &&
-                                      String(p.bathrooms)
-                                        .split(", ")
-                                        .some((b) =>
-                                          bathroomsFilter.includes(Number(b)),
-                                        ))) &&
-                                  (configurationFilter.length === 0 ||
-                                    configurationFilter.some((config) =>
-                                      (p.configuration || p.type || "")
-                                        .toLowerCase()
-                                        .includes(config.toLowerCase()),
-                                    )) &&
-                                  p.price >= priceRangeFilter[0] &&
-                                  p.price <= priceRangeFilter[1],
-                              );
-
-                              const csvContent =
-                                "data:text/csv;charset=utf-8," +
-                                "ID,Title,Type,Configuration,Possession,Location,Price,Status,Builder,Area,Bathrooms,Assigned To,Created At\n" +
-                                filtered
-                                  .map(
-                                    (p) =>
-                                      `${p.id},"${p.title}","${p.type}","${p.configuration}","${p.possessionStatus}","${p.location}",${p.price},"${p.status}","${p.builderName || ""}","${p.area || ""}","${p.bathrooms || ""}","${p.assignedTo || ""}","${p.createdAt || ""}"`,
-                                  )
-                                  .join("\n");
-
-                              const encodedUri = encodeURI(csvContent);
-                              const link = document.createElement("a");
-                              link.setAttribute("href", encodedUri);
-                              link.setAttribute(
-                                "download",
-                                `pysync_projects_${new Date().toISOString().split("T")[0]}.csv`,
-                              );
-                              document.body.appendChild(link);
-                              link.click();
-                              document.body.removeChild(link);
-                            }}
-                            className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl border border-border-bright bg-surface-2 text-text-dim hover:text-amber-primary hover:border-amber-primary transition-all"
-                            title="Export filtered projects to CSV"
-                          >
-                            <Download size={14} /> Export
-                          </button>
-                          <button
-                            onClick={() =>
-                              setShowAdvancedFilters(!showAdvancedFilters)
-                            }
-                            className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl border transition-all ${
-                              showAdvancedFilters
-                                ? "bg-amber-primary border-amber-primary text-bg shadow-lg shadow-amber-primary/20"
-                                : "bg-surface-2 border-border-bright text-text-dim hover:border-amber-primary/50"
-                            }`}
-                          >
-                            <Filter size={14} />{" "}
-                            {showAdvancedFilters ? "Hide" : "Filters"}
-                          </button>
                         </div>
                       </div>
 
                       {showAdvancedFilters && (
                         <motion.div
-                          initial={{ opacity: 0, y: -10 }}
+                          initial={{ opacity: 0, y: -12 }}
                           animate={{ opacity: 1, y: 0 }}
-                          className="bg-surface p-8 border border-border-dim rounded-2xl shadow-xl grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8"
+                          className="bg-surface/50 backdrop-blur-md p-6 md:p-8 border border-border-dim/40 rounded-3xl shadow-xl grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8 relative z-20"
                         >
-                          <div className="space-y-4">
+                          {/* Manager Filter Card */}
+                          <div className="space-y-3 bg-surface-2/40 border border-border-bright p-4 rounded-2xl relative">
                             <div className="flex items-center gap-2 text-amber-primary">
-                              <User size={16} />
-                              <span className="text-[10px] font-black uppercase tracking-widest">
+                              <User size={14} className="opacity-90" />
+                              <span className="text-[9px] font-black uppercase tracking-widest">
                                 Assigned Manager
                               </span>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setIsManagerDropdownOpen(!isManagerDropdownOpen)
-                              }
-                              className="w-full bg-surface-2 border border-border-bright rounded-xl px-4 py-3 text-sm text-text-primary outline-none hover:border-amber-primary font-medium flex items-center justify-between"
-                            >
-                              <span>
-                                {assignedToFilter === "All"
-                                  ? "All Managers"
-                                  : assignedToFilter}
-                              </span>
-                              <ChevronRight
-                                size={16}
-                                className={`rotate-90 transition-transform duration-200 ${isManagerDropdownOpen ? "rotate-270" : ""} text-text-dim`}
-                              />
-                            </button>
-                            <AnimatePresence>
-                              {isManagerDropdownOpen && (
-                                <motion.div
-                                  initial={{ opacity: 0, scale: 0.95, y: 5 }}
-                                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                                  exit={{ opacity: 0, scale: 0.95, y: 5 }}
-                                  transition={{ duration: 0.15 }}
-                                  className="absolute left-0 right-0 top-full mt-2 bg-surface border border-border-dim rounded-xl shadow-xl z-50 p-1.5 max-h-56 overflow-y-auto custom-scrollbar space-y-0.5"
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setAssignedToFilter("All");
-                                      setIsManagerDropdownOpen(false);
-                                    }}
-                                    className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors ${assignedToFilter === "All" ? "bg-amber-primary text-bg font-bold" : "text-text-dim hover:text-text-primary hover:bg-surface-2"}`}
+                            <div className="relative">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setIsManagerDropdownOpen(!isManagerDropdownOpen)
+                                }
+                                className="w-full bg-surface-2 border border-border-bright rounded-xl px-3 py-2.5 text-xs text-text-primary outline-none hover:border-amber-primary font-medium flex items-center justify-between transition-colors"
+                              >
+                                <span>
+                                  {assignedToFilter === "All"
+                                    ? "All Managers"
+                                    : assignedToFilter}
+                                </span>
+                                <ChevronRight
+                                  size={14}
+                                  className={`rotate-90 transition-transform duration-200 ${isManagerDropdownOpen ? "rotate-270" : ""} text-text-dim`}
+                                />
+                              </button>
+                              <AnimatePresence>
+                                {isManagerDropdownOpen && (
+                                  <motion.div
+                                    initial={{ opacity: 0, scale: 0.95, y: 5 }}
+                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                    exit={{ opacity: 0, scale: 0.95, y: 5 }}
+                                    transition={{ duration: 0.1 }}
+                                    className="absolute left-0 right-0 top-full mt-2 bg-surface border border-border-dim rounded-xl shadow-xl z-50 p-1 max-h-52 overflow-y-auto custom-scrollbar space-y-0.5"
                                   >
-                                    All Managers
-                                  </button>
-                                  {Array.from(
-                                    new Set(
-                                      projects
-                                        .map((p) => p.assignedTo)
-                                        .filter(
-                                          (
-                                            assignedTo,
-                                          ): assignedTo is string =>
-                                            Boolean(assignedTo),
-                                        ),
-                                    ),
-                                  ).map((name) => (
                                     <button
                                       type="button"
-                                      key={name}
                                       onClick={() => {
-                                        setAssignedToFilter(name);
+                                        setAssignedToFilter("All");
                                         setIsManagerDropdownOpen(false);
                                       }}
-                                      className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors ${assignedToFilter === name ? "bg-amber-primary text-bg font-bold" : "text-text-dim hover:text-text-primary hover:bg-surface-2"}`}
+                                      className={`w-full text-left px-3 py-1.5 text-xs rounded-lg transition-colors flex items-center justify-between ${assignedToFilter === "All" ? "bg-amber-primary text-bg font-bold" : "text-text-dim hover:text-text-primary hover:bg-surface-2"}`}
                                     >
-                                      {name}
+                                      <span>All Managers</span>
+                                      {assignedToFilter === "All" && <Check size={10} />}
                                     </button>
-                                  ))}
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
+                                    {Array.from(
+                                      new Set(
+                                        projects
+                                          .map((p) => p.assignedTo)
+                                          .filter(Boolean),
+                                      ),
+                                    ).map((name) => (
+                                      <button
+                                        type="button"
+                                        key={name}
+                                        onClick={() => {
+                                          setAssignedToFilter(name);
+                                          setIsManagerDropdownOpen(false);
+                                        }}
+                                        className={`w-full text-left px-3 py-1.5 text-xs rounded-lg transition-colors flex items-center justify-between ${assignedToFilter === name ? "bg-amber-primary text-bg font-bold" : "text-text-dim hover:text-text-primary hover:bg-surface-2"}`}
+                                      >
+                                        <span>{name}</span>
+                                        {assignedToFilter === name && <Check size={10} />}
+                                      </button>
+                                    ))}
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </div>
                           </div>
 
-                          <div
-                            className="space-y-4 col-span-1 relative"
-                            onMouseLeave={() => setIsBuilderDropdownOpen(false)}
-                          >
+                          {/* Builder Filter Card */}
+                          <div className="space-y-3 bg-surface-2/40 border border-border-bright p-4 rounded-2xl relative">
                             <div className="flex items-center gap-2 text-amber-primary">
-                              <Building2 size={16} />
-                              <span className="text-[10px] font-black uppercase tracking-widest">
-                                Builder Name
+                              <Building2 size={14} className="opacity-90" />
+                              <span className="text-[9px] font-black uppercase tracking-widest">
+                                Builder Brand
                               </span>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setIsBuilderDropdownOpen(!isBuilderDropdownOpen)
-                              }
-                              className="w-full bg-surface-2 border border-border-bright rounded-xl px-4 py-3 text-sm text-text-primary outline-none hover:border-amber-primary font-medium flex items-center justify-between"
-                            >
-                              <span>
-                                {builderFilter === "All"
-                                  ? "All Builders"
-                                  : builderFilter}
-                              </span>
-                              <ChevronRight
-                                size={16}
-                                className={`rotate-90 transition-transform duration-200 ${isBuilderDropdownOpen ? "rotate-270" : ""} text-text-dim`}
-                              />
-                            </button>
-                            <AnimatePresence>
-                              {isBuilderDropdownOpen && (
-                                <motion.div
-                                  initial={{ opacity: 0, scale: 0.95, y: 5 }}
-                                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                                  exit={{ opacity: 0, scale: 0.95, y: 5 }}
-                                  transition={{ duration: 0.15 }}
-                                  className="absolute left-0 right-0 top-full mt-2 bg-surface border border-border-dim rounded-xl shadow-xl z-50 p-1.5 max-h-56 overflow-y-auto custom-scrollbar space-y-0.5"
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setBuilderFilter("All");
-                                      setIsBuilderDropdownOpen(false);
-                                    }}
-                                    className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors ${builderFilter === "All" ? "bg-amber-primary text-bg font-bold" : "text-text-dim hover:text-text-primary hover:bg-surface-2"}`}
+                            <div className="relative">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setIsBuilderDropdownOpen(!isBuilderDropdownOpen)
+                                }
+                                className="w-full bg-surface-2 border border-border-bright rounded-xl px-3 py-2.5 text-xs text-text-primary outline-none hover:border-amber-primary font-medium flex items-center justify-between transition-colors"
+                              >
+                                <span>
+                                  {builderFilter === "All"
+                                    ? "All Builders"
+                                    : builderFilter}
+                                </span>
+                                <ChevronRight
+                                  size={14}
+                                  className={`rotate-90 transition-transform duration-200 ${isBuilderDropdownOpen ? "rotate-270" : ""} text-text-dim`}
+                                />
+                              </button>
+                              <AnimatePresence>
+                                {isBuilderDropdownOpen && (
+                                  <motion.div
+                                    initial={{ opacity: 0, scale: 0.95, y: 5 }}
+                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                    exit={{ opacity: 0, scale: 0.95, y: 5 }}
+                                    transition={{ duration: 0.1 }}
+                                    className="absolute left-0 right-0 top-full mt-2 bg-surface border border-border-dim rounded-xl shadow-xl z-50 p-1 max-h-52 overflow-y-auto custom-scrollbar space-y-0.5"
                                   >
-                                    All Builders
-                                  </button>
-                                  {Array.from(
-                                    new Set(
-                                      projects
-                                        .map((p) => p.builderName)
-                                        .filter(
-                                          (
-                                            builderName,
-                                          ): builderName is string =>
-                                            Boolean(builderName),
-                                        ),
-                                    ),
-                                  ).map((name) => (
                                     <button
                                       type="button"
-                                      key={name}
                                       onClick={() => {
-                                        setBuilderFilter(name);
+                                        setBuilderFilter("All");
                                         setIsBuilderDropdownOpen(false);
                                       }}
-                                      className={`w-full text-left px-3 py-2 text-sm rounded-lg transition-colors ${builderFilter === name ? "bg-amber-primary text-bg font-bold" : "text-text-dim hover:text-text-primary hover:bg-surface-2"}`}
+                                      className={`w-full text-left px-3 py-1.5 text-xs rounded-lg transition-colors flex items-center justify-between ${builderFilter === "All" ? "bg-amber-primary text-bg font-bold" : "text-text-dim hover:text-text-primary hover:bg-surface-2"}`}
                                     >
-                                      {name}
+                                      <span>All Builders</span>
+                                      {builderFilter === "All" && <Check size={10} />}
                                     </button>
-                                  ))}
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
+                                    {Array.from(
+                                      new Set(
+                                        [...projects.map((p) => p.builderName), ...resaleProperties.map((r) => r.builderName)].filter(Boolean)
+                                      ),
+                                    ).map((name) => (
+                                      <button
+                                        type="button"
+                                        key={name}
+                                        onClick={() => {
+                                          setBuilderFilter(name);
+                                          setIsBuilderDropdownOpen(false);
+                                        }}
+                                        className={`w-full text-left px-3 py-1.5 text-xs rounded-lg transition-colors flex items-center justify-between ${builderFilter === name ? "bg-amber-primary text-bg font-bold" : "text-text-dim hover:text-text-primary hover:bg-surface-2"}`}
+                                      >
+                                        <span>{name}</span>
+                                        {builderFilter === name && <Check size={10} />}
+                                      </button>
+                                    ))}
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </div>
                           </div>
 
-                          <div className="space-y-4">
+                          {/* Possession Status Filter Card */}
+                          <div className="space-y-3 bg-surface-2/40 border border-border-bright p-4 rounded-2xl">
                             <div className="flex items-center gap-2 text-amber-primary">
-                              <Clock size={16} />
-                              <span className="text-[10px] font-black uppercase tracking-widest">
-                                Possession
+                              <Clock size={14} className="opacity-90" />
+                              <span className="text-[9px] font-black uppercase tracking-widest">
+                                Possession Phase
                               </span>
                             </div>
-                            <div className="flex flex-wrap gap-2">
+                            <div className="flex flex-wrap gap-1">
                               {[
                                 "All",
                                 "Ready to Move",
                                 "Under Construction",
                                 "New Launch",
-                              ].map((status) => (
-                                <button
-                                  key={status}
-                                  onClick={() => togglePossessionFilter(status)}
-                                  className={`px-3 py-2 rounded-xl text-[10px] border transition-all font-bold ${
-                                    possessionFilter.includes(status)
-                                      ? "bg-amber-primary border-amber-primary text-bg shadow-md"
-                                      : "bg-surface-2 border-border-bright text-text-dim hover:border-amber-primary/50"
-                                  }`}
-                                >
-                                  {status}
-                                </button>
-                              ))}
+                              ].map((status) => {
+                                const isSel = possessionFilter.includes(status);
+                                return (
+                                  <button
+                                    key={status}
+                                    onClick={() => togglePossessionFilter(status)}
+                                    className={`px-2.5 py-1.5 rounded-lg text-[9px] border transition-all font-bold ${
+                                      isSel
+                                        ? "bg-amber-primary border-amber-primary text-bg shadow-sm"
+                                        : "bg-surface-2 border-border-bright text-text-dim hover:border-amber-primary/50 hover:bg-surface-3/30"
+                                    }`}
+                                  >
+                                    {status}
+                                  </button>
+                                );
+                              })}
                             </div>
                           </div>
 
-                          <div className="space-y-4">
+                          {/* BHK Size Filter Card */}
+                          <div className="space-y-3 bg-surface-2/40 border border-border-bright p-4 rounded-2xl">
                             <div className="flex items-center gap-2 text-amber-primary">
-                              <Bath size={16} />
-                              <span className="text-[10px] font-black uppercase tracking-widest">
-                                Bathrooms
+                              <Layers size={14} className="opacity-90" />
+                              <span className="text-[9px] font-black uppercase tracking-widest">
+                                Configuration
                               </span>
                             </div>
-                            <div className="flex flex-wrap gap-2">
-                              {[1, 2, 3, 4, 5].map((count) => (
-                                <button
-                                  key={count}
-                                  onClick={() => toggleBathroomFilter(count)}
-                                  className={`w-10 h-10 rounded-xl text-[10px] border flex items-center justify-center transition-all font-bold ${
-                                    bathroomsFilter.includes(count)
-                                      ? "bg-amber-primary border-amber-primary text-bg shadow-md"
-                                      : "bg-surface-2 border-border-bright text-text-dim hover:border-amber-primary/50"
-                                  }`}
-                                >
-                                  {count}+
-                                </button>
-                              ))}
+                            <div className="flex flex-wrap gap-1">
+                              {["1 BHK", "2 BHK", "3 BHK", "4 BHK", "5 BHK"].map((bhk) => {
+                                const isSel = configurationFilter.includes(bhk);
+                                return (
+                                  <button
+                                    key={bhk}
+                                    type="button"
+                                    onClick={() => toggleConfigurationFilter(bhk)}
+                                    className={`px-2.5 py-1.5 rounded-lg text-[9px] border transition-all font-bold ${
+                                      isSel
+                                        ? "bg-amber-primary border-amber-primary text-bg shadow-sm"
+                                        : "bg-surface-2 border-border-bright text-text-dim hover:border-amber-primary/50 hover:bg-surface-3/30"
+                                    }`}
+                                  >
+                                    {bhk}
+                                  </button>
+                                );
+                              })}
                             </div>
                           </div>
 
-                          <div className="space-y-4">
+                          {/* Price Range Filter Card */}
+                          <div className="space-y-3 bg-surface-2/40 border border-border-bright p-4 rounded-2xl">
                             <div className="flex items-center gap-2 text-amber-primary">
-                              <Layers size={16} />
-                              <span className="text-[10px] font-black uppercase tracking-widest">
-                                BHK Size
+                              <IndianRupee size={14} className="opacity-90" />
+                              <span className="text-[9px] font-black uppercase tracking-widest">
+                                Price (Lakhs)
                               </span>
                             </div>
-                            <div className="flex flex-wrap gap-2">
-                              {["2 BHK", "3 BHK", "4 BHK", "5 BHK"].map((bhk) => (
-                                <button
-                                  key={bhk}
-                                  type="button"
-                                  onClick={() => toggleConfigurationFilter(bhk)}
-                                  className={`px-3 py-2 rounded-xl text-[10px] border transition-all font-bold ${
-                                    configurationFilter.includes(bhk)
-                                      ? "bg-amber-primary border-amber-primary text-bg shadow-md"
-                                      : "bg-surface-2 border-border-bright text-text-dim hover:border-amber-primary/50"
-                                  }`}
-                                >
-                                  {bhk}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div className="space-y-4">
-                            <div className="flex items-center gap-2 text-amber-primary">
-                              <IndianRupee size={16} />
-                              <span className="text-[10px] font-black uppercase tracking-widest">
-                                Price Range (Lakhs)
-                              </span>
-                            </div>
-                            <div className="grid grid-cols-2 gap-3">
+                            <div className="grid grid-cols-2 gap-2">
                               <div className="space-y-1">
-                                <label className="text-[8px] text-text-dim uppercase font-black">
-                                  Min
-                                </label>
+                                <span className="text-[8px] text-text-dim uppercase font-black">
+                                  Min Value
+                                </span>
                                 <input
                                   type="number"
                                   value={priceRangeFilter[0] / 100000}
@@ -11381,13 +14176,13 @@ export default function App() {
                                       priceRangeFilter[1],
                                     ])
                                   }
-                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-amber-primary font-mono"
+                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-2 py-1.5 text-xs text-text-primary outline-none focus:border-amber-primary font-mono font-bold"
                                 />
                               </div>
                               <div className="space-y-1">
-                                <label className="text-[8px] text-text-dim uppercase font-black">
-                                  Max
-                                </label>
+                                <span className="text-[8px] text-text-dim uppercase font-black">
+                                  Max Value
+                                </span>
                                 <input
                                   type="number"
                                   value={priceRangeFilter[1] / 100000}
@@ -11397,24 +14192,25 @@ export default function App() {
                                       Number(e.target.value) * 100000,
                                     ])
                                   }
-                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-amber-primary font-mono"
+                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-2 py-1.5 text-xs text-text-primary outline-none focus:border-amber-primary font-mono font-bold"
                                 />
                               </div>
                             </div>
                           </div>
 
-                          <div className="space-y-4">
+                          {/* Area Range Filter Card */}
+                          <div className="space-y-3 bg-surface-2/40 border border-border-bright p-4 rounded-2xl">
                             <div className="flex items-center gap-2 text-amber-primary">
-                              <Maximize2 size={16} />
-                              <span className="text-[10px] font-black uppercase tracking-widest">
-                                Area Range (Sq.Ft.)
+                              <Maximize2 size={14} className="opacity-90" />
+                              <span className="text-[9px] font-black uppercase tracking-widest">
+                                Area Size (Sq.Ft.)
                               </span>
                             </div>
-                            <div className="grid grid-cols-2 gap-3">
+                            <div className="grid grid-cols-2 gap-2">
                               <div className="space-y-1">
-                                <label className="text-[8px] text-text-dim uppercase font-black">
+                                <span className="text-[8px] text-text-dim uppercase font-black">
                                   Min Area
-                                </label>
+                                </span>
                                 <input
                                   type="number"
                                   value={areaRangeFilter[0]}
@@ -11424,13 +14220,13 @@ export default function App() {
                                       areaRangeFilter[1],
                                     ])
                                   }
-                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-amber-primary font-mono"
+                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-2 py-1.5 text-xs text-text-primary outline-none focus:border-amber-primary font-mono font-bold"
                                 />
                               </div>
                               <div className="space-y-1">
-                                <label className="text-[8px] text-text-dim uppercase font-black">
+                                <span className="text-[8px] text-text-dim uppercase font-black">
                                   Max Area
-                                </label>
+                                </span>
                                 <input
                                   type="number"
                                   value={areaRangeFilter[1]}
@@ -11440,24 +14236,53 @@ export default function App() {
                                       Number(e.target.value),
                                     ])
                                   }
-                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-amber-primary font-mono"
+                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-2 py-1.5 text-xs text-text-primary outline-none focus:border-amber-primary font-mono font-bold"
                                 />
                               </div>
                             </div>
                           </div>
 
-                          <div className="space-y-4">
+                          {/* Bathrooms Filter Card */}
+                          <div className="space-y-3 bg-surface-2/40 border border-border-bright p-4 rounded-2xl">
                             <div className="flex items-center gap-2 text-amber-primary">
-                              <Home size={16} />
-                              <span className="text-[10px] font-black uppercase tracking-widest">
-                                Total Units Range
+                              <Bath size={14} className="opacity-90" />
+                              <span className="text-[9px] font-black uppercase tracking-widest">
+                                Bathrooms
                               </span>
                             </div>
-                            <div className="grid grid-cols-2 gap-3">
+                            <div className="flex flex-wrap gap-1">
+                              {[1, 2, 3, 4, 5].map((count) => {
+                                const isSel = bathroomsFilter.includes(count);
+                                return (
+                                  <button
+                                    key={count}
+                                    onClick={() => toggleBathroomFilter(count)}
+                                    className={`w-8 h-8 rounded-lg text-[10px] border flex items-center justify-center transition-all font-black ${
+                                      isSel
+                                        ? "bg-amber-primary border-amber-primary text-bg shadow-sm"
+                                        : "bg-surface-2 border-border-bright text-text-dim hover:border-amber-primary/50 hover:bg-surface-3/30"
+                                    }`}
+                                  >
+                                    {count}+
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Total Units Range Filter Card */}
+                          <div className="space-y-3 bg-surface-2/40 border border-border-bright p-4 rounded-2xl">
+                            <div className="flex items-center gap-2 text-amber-primary">
+                              <Home size={14} className="opacity-90" />
+                              <span className="text-[9px] font-black uppercase tracking-widest">
+                                Total Units Scale
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
                               <div className="space-y-1">
-                                <label className="text-[8px] text-text-dim uppercase font-black">
+                                <span className="text-[8px] text-text-dim uppercase font-black">
                                   Min Units
-                                </label>
+                                </span>
                                 <input
                                   type="number"
                                   value={unitsRangeFilter[0]}
@@ -11467,13 +14292,13 @@ export default function App() {
                                       unitsRangeFilter[1],
                                     ])
                                   }
-                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-amber-primary font-mono"
+                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-2 py-1.5 text-xs text-text-primary outline-none focus:border-amber-primary font-mono font-bold"
                                 />
                               </div>
                               <div className="space-y-1">
-                                <label className="text-[8px] text-text-dim uppercase font-black">
+                                <span className="text-[8px] text-text-dim uppercase font-black">
                                   Max Units
-                                </label>
+                                </span>
                                 <input
                                   type="number"
                                   value={unitsRangeFilter[1]}
@@ -11483,11 +14308,16 @@ export default function App() {
                                       Number(e.target.value),
                                     ])
                                   }
-                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-amber-primary font-mono"
+                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-2 py-1.5 text-xs text-text-primary outline-none focus:border-amber-primary font-mono font-bold"
                                 />
                               </div>
                             </div>
+                          </div>
+
+                          {/* Bottom Row Glow and Reset Action */}
+                          <div className="col-span-full pt-4 border-t border-border-dim/30 flex justify-end">
                             <button
+                              type="button"
                               onClick={() => {
                                 setPriceRangeFilter([0, 1000000000]);
                                 setAreaRangeFilter([0, 100000]);
@@ -11498,22 +14328,22 @@ export default function App() {
                                 setAssignedToFilter("All");
                                 setBuilderFilter("All");
                               }}
-                              className="text-[9px] text-amber-primary hover:underline uppercase font-black tracking-widest block mt-2"
+                              className="text-[10px] bg-red-500/10 border border-red-500/25 hover:bg-red-500 hover:text-white transition-all text-red-500 px-4 py-2 rounded-xl font-black uppercase tracking-widest"
                             >
-                              Reset Filters
+                              Reset Active Filters
                             </button>
                           </div>
                         </motion.div>
                       )}
 
-                      <AnimatePresence mode="wait">
+                      <AnimatePresence mode="popLayout">
                         {viewMode === "map" ? (
                           <motion.div
                             key="map"
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -10 }}
-                            transition={{ duration: 0.2 }}
+                            initial={{ opacity: 0, scale: 0.98 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.98 }}
+                            transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
                             className="w-full"
                           >
                             <ProjectMapView
@@ -11528,11 +14358,11 @@ export default function App() {
                           </motion.div>
                         ) : viewMode === "grid" ? (
                           <motion.div
-                            key="grid"
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -10 }}
-                            transition={{ duration: 0.2 }}
+                            key={`grid-${builderFilter}-${searchQuery}-${statusFilter.join(",")}-${possessionFilter.join(",")}-${assignedToFilter}-${bathroomsFilter.join(",")}-${configurationFilter.join(",")}-${priceRangeFilter.join(",")}-${areaRangeFilter.join(",")}-${unitsRangeFilter.join(",")}-${showPriceAlertsOnly}-${sortBy}`}
+                            initial={{ opacity: 0, scale: 0.98 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.98 }}
+                            transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
                             className="w-full"
                           >
                             <motion.div layout className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,290px),1fr))] gap-6">
@@ -11601,13 +14431,14 @@ export default function App() {
                                     );
                                   }
 
-                                  return filtered.map((p) => (
+                                  return filtered.map((p, index) => (
                                     <motion.div
                                       layout
-                                      initial={{ opacity: 0, scale: 0.9 }}
-                                      animate={{ opacity: 1, scale: 1 }}
-                                      exit={{ opacity: 0, scale: 0.9 }}
-                                      transition={{ duration: 0.2 }}
+                                      custom={index}
+                                      variants={projectCardVariants}
+                                      initial="hidden"
+                                      animate="visible"
+                                      exit="exit"
                                       key={p.id}
                                     >
                                       <ProjectCard
@@ -11632,6 +14463,9 @@ export default function App() {
                                           setViewMode("map");
                                           setSelectedMapItemId(proj.id);
                                         }}
+                                        isAlertActive={!!priceAlerts[p.id]}
+                                        alertActiveSince={priceAlerts[p.id]?.createdAt}
+                                        onToggleAlert={handleTogglePriceAlert}
                                       />
                                     </motion.div>
                                   ));
@@ -11641,16 +14475,17 @@ export default function App() {
                           </motion.div>
                         ) : (
                           <motion.div
-                            key="table"
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -10 }}
-                            transition={{ duration: 0.2 }}
+                            key={`table-${builderFilter}-${searchQuery}-${statusFilter.join(",")}-${possessionFilter.join(",")}-${assignedToFilter}-${bathroomsFilter.join(",")}-${configurationFilter.join(",")}-${priceRangeFilter.join(",")}-${areaRangeFilter.join(",")}-${unitsRangeFilter.join(",")}-${showPriceAlertsOnly}-${sortBy}`}
+                            initial={{ opacity: 0, scale: 0.98 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.98 }}
+                            transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
                             className="w-full"
                           >
-                            <div className="bg-surface border border-border-dim rounded-2xl overflow-hidden shadow-xl">
+                            {/* Table view for Desktop & Tablet viewports */}
+                            <div className="hidden md:block bg-surface border border-border-dim rounded-2xl overflow-hidden shadow-xl">
                               <div className="overflow-x-auto no-scrollbar">
-                            <table className="w-full text-left border-separate border-spacing-0 min-w-[1000px]">
+                                <table className="w-full text-left border-separate border-spacing-0 min-w-[1000px]">
                               <thead>
                                 <tr className="bg-surface-2/30">
                                   <th className="px-6 py-4 w-12 border-b border-border-dim first:rounded-tl-2xl">
@@ -11845,8 +14680,13 @@ export default function App() {
                                   }
 
                                   return filtered.map((p, index) => (
-                                    <tr
+                                    <motion.tr
                                       key={p.id}
+                                      custom={index}
+                                      variants={projectRowVariants}
+                                      initial="hidden"
+                                      animate="visible"
+                                      exit="exit"
                                       onClick={() => setSelectedProject(p)}
                                       className={`group transition-all duration-300 cursor-pointer ${
                                         selectedProjectIds.includes(p.id)
@@ -11999,25 +14839,52 @@ export default function App() {
                                       </td>
                                       <td className="px-6 py-4 border-b border-border-dim/30">
                                         <span
-                                          className={`inline-flex items-center gap-2 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-[0.1em] border ${
+                                          className={`inline-flex items-center gap-2 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-[0.1em] border transition-all ${
                                             p.status === "Active"
                                               ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.05)]"
                                               : p.status === "PENDING_DELETE"
-                                                ? "border-red-500/20 bg-red-500/5 text-red-500"
-                                                : "border-amber-500/20 bg-amber-500/5 text-amber-500"
+                                                ? "border-red-500/50 bg-red-500/15 text-red-400 shadow-sm animate-breathe"
+                                                : "border-amber-500/60 bg-amber-500/20 text-amber-300 shadow-sm animate-breathe"
                                           }`}
                                         >
-                                          {p.status === "Active" && (
+                                          {p.status === "Active" ? (
                                             <span className="relative flex h-1.5 w-1.5">
                                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                                               <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
                                             </span>
+                                          ) : (
+                                            <span className="relative flex h-1.5 w-1.5">
+                                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-400 animate-breathe-dot"></span>
+                                            </span>
                                           )}
-                                          {p.status}
+                                          {p.status === "PENDING_DELETE" ? "Pending Delete" : p.status}
                                         </span>
                                       </td>
                                       <td className="px-6 py-4 border-b border-border-dim/30 text-right">
                                         <div className="flex items-center justify-end gap-1">
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleTogglePriceAlert(p);
+                                            }}
+                                            className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${
+                                              priceAlerts[p.id]
+                                                ? "text-amber-primary bg-amber-primary/15 hover:bg-amber-primary/25 border border-amber-primary/30"
+                                                : "text-text-dim hover:text-amber-primary hover:bg-amber-primary/10"
+                                            }`}
+                                            title={
+                                              priceAlerts[p.id]
+                                                ? "Price Alert Active (Click to disable)"
+                                                : "Enable Price Alert"
+                                            }
+                                          >
+                                            <Bell
+                                              size={14}
+                                              className={priceAlerts[p.id] ? "fill-amber-primary animate-pulse" : ""}
+                                            />
+                                          </button>
                                           <button
                                             onClick={() =>
                                               setSelectedProject(p)
@@ -12054,12 +14921,103 @@ export default function App() {
                                           )}
                                         </div>
                                       </td>
-                                    </tr>
+                                    </motion.tr>
                                   ));
                                 })()}
                               </tbody>
                             </table>
                           </div>
+                        </div>
+
+                        {/* Cards / Grid view for Mobile viewports when Table view is active */}
+                        <div className="md:hidden">
+                          <motion.div layout className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,290px),1fr))] gap-6">
+                            <AnimatePresence mode="popLayout">
+                              {(() => {
+                                let filtered = projects.filter(matchesProjectFilters);
+
+                                if (sortBy === "price-asc") {
+                                  filtered = [...filtered].sort((a, b) => a.price - b.price);
+                                } else if (sortBy === "price-desc") {
+                                  filtered = [...filtered].sort((a, b) => b.price - a.price);
+                                } else if (sortBy === "location-asc") {
+                                  filtered = [...filtered].sort((a, b) => a.location.localeCompare(b.location));
+                                } else if (sortBy === "location-desc") {
+                                  filtered = [...filtered].sort((a, b) => b.location.localeCompare(a.location));
+                                } else if (sortBy === "title-asc") {
+                                  filtered = [...filtered].sort((a, b) => a.title.localeCompare(b.title));
+                                } else if (sortBy === "title-desc") {
+                                  filtered = [...filtered].sort((a, b) => b.title.localeCompare(a.title));
+                                } else if (sortBy === "builder-asc") {
+                                  filtered = [...filtered].sort((a, b) => (a.builderName || "").localeCompare(b.builderName || ""));
+                                } else if (sortBy === "builder-desc") {
+                                  filtered = [...filtered].sort((a, b) => (b.builderName || "").localeCompare(a.builderName || ""));
+                                }
+
+                                if (filtered.length === 0) {
+                                  return (
+                                    <motion.div
+                                      key="empty"
+                                      layout
+                                      initial={{ opacity: 0, scale: 0.9 }}
+                                      animate={{ opacity: 1, scale: 1 }}
+                                      exit={{ opacity: 0, scale: 0.9 }}
+                                      className="col-span-full py-24 text-center space-y-4 bg-surface border border-border-dim rounded-2xl border-dashed"
+                                    >
+                                      <div className="p-4 bg-surface-2 rounded-full w-fit mx-auto text-text-dim">
+                                        <Search size={32} />
+                                      </div>
+                                      <p className="text-sm font-bold text-text-primary">
+                                        No projects found
+                                      </p>
+                                      <p className="text-xs text-text-dim">
+                                        Try adjusting your filters or search query.
+                                      </p>
+                                    </motion.div>
+                                  );
+                                }
+
+                                return filtered.map((p, index) => (
+                                  <motion.div
+                                    layout
+                                    custom={index}
+                                    variants={projectCardVariants}
+                                    initial="hidden"
+                                    animate="visible"
+                                    exit="exit"
+                                    key={p.id}
+                                  >
+                                    <ProjectCard
+                                      project={p}
+                                      onClick={setSelectedProject}
+                                      onEdit={(p: any) => {
+                                        setEditingProject(p);
+                                        setIsModalOpen(true);
+                                      }}
+                                      onDelete={setProjectToDelete}
+                                      hasEditPermission={hasPermission(user, "EDIT_PROJECTS") && user?.role === "admin"}
+                                      hasDeletePermission={hasPermission(user, "DELETE_PROJECTS") && user?.role === "admin"}
+                                      isSelected={selectedProjectIds.includes(p.id)}
+                                      onSelect={(id: string) => {
+                                        setSelectedProjectIds((prev) =>
+                                          prev.includes(id)
+                                            ? prev.filter((i) => i !== id)
+                                            : [...prev, id],
+                                        );
+                                      }}
+                                      onShowOnMap={(proj: any) => {
+                                        setViewMode("map");
+                                        setSelectedMapItemId(proj.id);
+                                      }}
+                                      isAlertActive={!!priceAlerts[p.id]}
+                                      alertActiveSince={priceAlerts[p.id]?.createdAt}
+                                      onToggleAlert={handleTogglePriceAlert}
+                                    />
+                                  </motion.div>
+                                ));
+                              })()}
+                            </AnimatePresence>
+                          </motion.div>
                         </div>
                       </motion.div>
                       )}
@@ -12118,135 +15076,447 @@ export default function App() {
                       animate={{ opacity: 1, x: 0 }}
                       className="space-y-4 w-full max-w-none"
                     >
-                      <div className="flex flex-wrap gap-4 items-center justify-between bg-surface p-4 border border-border-dim rounded-xl w-full">
-                        <div className="flex flex-wrap gap-4 items-center">
-                          <div className="flex items-center gap-3 bg-surface-2 p-1 rounded-xl border border-border-bright">
-                            <button
-                              onClick={() => setViewMode("grid")}
-                              className={`p-2 rounded-lg transition-all ${viewMode === "grid" ? "bg-amber-primary text-bg shadow-lg shadow-amber-primary/20" : "text-text-dim hover:text-text-primary"}`}
-                            >
-                              <LayoutGrid size={18} />
-                            </button>
-                            <button
-                              onClick={() => setViewMode("table")}
-                              className={`p-2 rounded-lg transition-all ${viewMode === "table" ? "bg-amber-primary text-bg shadow-lg shadow-amber-primary/20" : "text-text-dim hover:text-text-primary"}`}
-                            >
-                              <List size={18} />
-                            </button>
-                            <button
-                              onClick={() => setViewMode("map")}
-                              className={`p-2 rounded-lg transition-all ${viewMode === "map" ? "bg-amber-primary text-bg shadow-lg shadow-amber-primary/20" : "text-text-dim hover:text-text-primary"}`}
-                            >
-                              <MapPin size={18} />
-                            </button>
-                          </div>
-
-                          <div className="h-8 w-px bg-border-dim hidden lg:block" />
-
-                          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                            <span className="text-[10px] text-text-dim uppercase tracking-wider font-bold">
-                              Status:
+                      <div className="bg-surface/70 backdrop-blur-md border border-border-dim/40 rounded-3xl p-5 shadow-lg relative z-30 w-full space-y-4">
+                        <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-amber-primary/30 to-transparent pointer-events-none" />
+                        
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-border-dim/30">
+                          <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-amber-primary animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.5)]" />
+                            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-text-primary">
+                              Resale Inventory Filter Console
                             </span>
-                            <div className="flex flex-wrap gap-1">
-                              {[
-                                "All",
-                                "Active",
-                                "Sold",
-                                "Pending",
-                                "PENDING_DELETE",
-                              ].map((status) => (
-                                <button
-                                  key={status}
-                                  onClick={() => toggleStatusFilter(status)}
-                                  className={`px-2 py-1 rounded text-[10px] border transition-all ${
-                                    statusFilter.includes(status)
-                                      ? "bg-amber-primary border-amber-primary text-bg font-bold"
-                                      : "bg-surface-2 border-border-bright text-text-dim hover:border-amber-primary/50"
-                                  }`}
-                                >
-                                  {status === "PENDING_DELETE"
-                                    ? "Del Req"
-                                    : status}
-                                </button>
-                              ))}
-                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 text-[10px] font-mono text-text-dim">
+                            <span className="font-bold text-text-secondary">{resaleProperties.filter(matchesResaleFilters).length}</span>
+                            <span>/</span>
+                            <span>{resaleProperties.length} Total Resales</span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-4">
-                          <div className="text-[10px] text-text-dim uppercase tracking-widest font-mono">
-                            {resaleProperties.length} Total Records
+
+                        <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between w-full">
+                          <div className="flex flex-wrap gap-4 items-center">
+                            {/* View Mode */}
+                            <div className="hidden md:flex items-center gap-1.5 bg-surface-2 p-1 rounded-xl border border-border-bright">
+                              <button
+                                onClick={() => {
+                                  setViewMode("grid");
+                                  playSound("click");
+                                }}
+                                className={`p-2 rounded-lg transition-all flex items-center gap-1.5 ${viewMode === "grid" ? "bg-amber-primary text-bg shadow-md shadow-amber-primary/25 font-bold" : "text-text-dim hover:text-text-primary hover:bg-surface-3/50"}`}
+                                title="Grid View (Press 'G')"
+                              >
+                                <LayoutGrid size={16} />
+                                <span className="hidden xl:inline text-[9px] font-mono px-1 py-0.2 rounded bg-black/20 text-text-secondary uppercase">G</span>
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setViewMode("table");
+                                  playSound("click");
+                                }}
+                                className={`p-2 rounded-lg transition-all flex items-center gap-1.5 ${viewMode === "table" ? "bg-amber-primary text-bg shadow-md shadow-amber-primary/25 font-bold" : "text-text-dim hover:text-text-primary hover:bg-surface-3/50"}`}
+                                title="Table View (Press 'T')"
+                              >
+                                <List size={16} />
+                                <span className="hidden xl:inline text-[9px] font-mono px-1 py-0.2 rounded bg-black/20 text-text-secondary uppercase">T</span>
+                              </button>
+                            </div>
+
+                            <div className="h-6 w-px bg-border-dim hidden lg:block" />
+
+                            {/* Status Filter */}
+                            <div className="flex items-center gap-2">
+                              <span className="text-[9px] text-text-dim uppercase tracking-widest font-black shrink-0">
+                                Status:
+                              </span>
+                              <div className="flex flex-wrap gap-1">
+                                {[
+                                  "All",
+                                  "Active",
+                                  "Sold",
+                                  "Pending",
+                                  "PENDING_DELETE",
+                                ].map((status) => {
+                                  const isActive = statusFilter.includes(status);
+                                  return (
+                                    <button
+                                      key={status}
+                                      onClick={() => toggleStatusFilter(status)}
+                                      className={`px-3 py-1.5 rounded-lg text-[9px] border transition-all font-black uppercase tracking-wider flex items-center gap-1 ${
+                                        isActive
+                                          ? "bg-amber-primary border-amber-primary text-bg shadow-md"
+                                          : "bg-surface-2 border-border-bright text-text-dim hover:border-amber-primary/50 hover:bg-surface-3/30"
+                                      }`}
+                                    >
+                                      {status === "Active" && (
+                                        <span className={`w-1 h-1 rounded-full ${isActive ? 'bg-bg' : 'bg-emerald-500 animate-pulse'}`} />
+                                      )}
+                                      <span>
+                                        {status === "PENDING_DELETE"
+                                          ? "Del Req"
+                                          : status}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
                           </div>
-                          <button
-                            onClick={() => {
-                              const filtered = resaleProperties.filter(
-                                (p) =>
-                                  (p.propertyHolderName
-                                    .toLowerCase()
-                                    .includes(searchQuery.toLowerCase()) ||
-                                    p.societyName
-                                      .toLowerCase()
-                                      .includes(searchQuery.toLowerCase()) ||
-                                    p.location
-                                      .toLowerCase()
-                                      .includes(searchQuery.toLowerCase())) &&
-                                  (statusFilter.includes("All") ||
-                                    statusFilter.includes(p.status)),
-                              );
 
-                              const csvContent =
-                                "data:text/csv;charset=utf-8," +
-                                "ID,Holder Name,Society,Location,Builder,Type,Size(Sqft),BHK,Price,Negotiable,Floor,Age,Possession Status,Possession Date,Status\n" +
-                                filtered
-                                  .map(
-                                    (p) =>
-                                      `${p.id},"${p.propertyHolderName}","${p.societyName}","${p.location}","${p.builderName}","${(p.propertyType || "").replace("FLATS", "Apartments").replace("Apartment", "Apartments")}",${p.sizeSqft},"${(p.bhk || "").includes("BHK") || (p.bhk || "").includes("Penthouse") ? (p.bhk || "").replace("5BHK", "Penthouse") : `${p.bhk || "Standard"} BHK`}",${p.price},${p.isNegotiable},"${p.floorNumber}","${p.propertyAge}","${p.possessionStatus || "N/A"}","${p.possessionDate || "N/A"}",${p.status}`,
-                                  )
-                                  .join("\n");
+                          <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
+                            {/* Export CSV button */}
+                            <button
+                              onClick={() => {
+                                const filtered = resaleProperties.filter(matchesResaleFilters);
+                                const csvContent =
+                                  "data:text/csv;charset=utf-8," +
+                                  "ID,Holder Name,Society,Location,Builder,Type,Size(Sqft),BHK,Price,Negotiable,Floor,Age,Possession Status,Possession Date,Status\n" +
+                                  filtered
+                                    .map(
+                                      (p) =>
+                                        `${p.id},"${p.propertyHolderName}","${p.societyName}","${p.location}","${p.builderName}","${(p.propertyType || "").replace("FLATS", "Apartments").replace("Apartment", "Apartments")}",${p.sizeSqft},"${(p.bhk || "").includes("BHK") || (p.bhk || "").includes("Penthouse") ? (p.bhk || "").replace("5BHK", "Penthouse") : `${p.bhk || "Standard"} BHK`}",${p.price},${p.isNegotiable},"${p.floorNumber}","${p.propertyAge}","${p.possessionStatus || "N/A"}","${p.possessionDate || "N/A"}",${p.status}`,
+                                    )
+                                    .join("\n");
 
-                              const encodedUri = encodeURI(csvContent);
-                              const link = document.createElement("a");
-                              link.setAttribute("href", encodedUri);
-                              link.setAttribute(
-                                "download",
-                                `pysync_resale_${new Date().toISOString().split("T")[0]}.csv`,
-                              );
-                              document.body.appendChild(link);
-                              link.click();
-                              document.body.removeChild(link);
-                            }}
-                            className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-amber-primary hover:text-amber-secondary transition-colors"
-                            title="Export filtered resale properties to CSV"
-                          >
-                            <Download size={14} /> Export CSV
-                          </button>
+                                const encodedUri = encodeURI(csvContent);
+                                const link = document.createElement("a");
+                                link.setAttribute("href", encodedUri);
+                                link.setAttribute(
+                                  "download",
+                                  `pysync_resale_${new Date().toISOString().split("T")[0]}.csv`,
+                                );
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                              }}
+                              className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl border border-border-bright bg-surface-2 text-text-dim hover:text-amber-primary hover:border-amber-primary hover:bg-surface-3/30 transition-all shadow-sm"
+                              title="Export filtered resales to CSV"
+                            >
+                              <Download size={12} />
+                              <span>Export</span>
+                            </button>
+
+                            {/* Show Advanced Filters toggle button */}
+                            <button
+                              onClick={() =>
+                                setShowAdvancedFilters(!showAdvancedFilters)
+                              }
+                              className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl border transition-all shadow-sm ${
+                                showAdvancedFilters
+                                  ? "bg-amber-primary border-amber-primary text-bg shadow-md"
+                                  : "bg-surface-2 border-border-bright text-text-dim hover:border-amber-primary/50 hover:bg-surface-3/30"
+                              }`}
+                            >
+                              <Filter size={12} />
+                              <span>{showAdvancedFilters ? "Hide Panel" : "Smart Filters"}</span>
+                              <AnimatePresence>
+                                {activeResaleFiltersCount > 0 && (
+                                  <motion.span
+                                    initial={{ scale: 0, opacity: 0 }}
+                                    animate={{ scale: 1, opacity: 1 }}
+                                    exit={{ scale: 0, opacity: 0 }}
+                                    className={`flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[9px] font-black rounded-full transition-colors ${
+                                      showAdvancedFilters
+                                        ? "bg-surface-2/90 text-amber-primary"
+                                        : "bg-amber-primary text-bg"
+                                    }`}
+                                  >
+                                    {activeResaleFiltersCount}
+                                  </motion.span>
+                                )}
+                              </AnimatePresence>
+                            </button>
+                          </div>
                         </div>
                       </div>
 
-                      <AnimatePresence mode="wait">
+                      {showAdvancedFilters && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -12 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="bg-surface/50 backdrop-blur-md p-6 md:p-8 border border-border-dim/40 rounded-3xl shadow-xl grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8 relative z-20"
+                        >
+                          {/* Builder Filter Card */}
+                          <div className="space-y-3 bg-surface-2/40 border border-border-bright p-4 rounded-2xl relative">
+                            <div className="flex items-center gap-2 text-amber-primary">
+                              <Building2 size={14} className="opacity-90" />
+                              <span className="text-[9px] font-black uppercase tracking-widest">
+                                Builder Brand
+                              </span>
+                            </div>
+                            <div className="relative">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setIsBuilderDropdownOpen(!isBuilderDropdownOpen)
+                                }
+                                className="w-full bg-surface-2 border border-border-bright rounded-xl px-3 py-2.5 text-xs text-text-primary outline-none hover:border-amber-primary font-medium flex items-center justify-between transition-colors"
+                              >
+                                <span>
+                                  {builderFilter === "All"
+                                    ? "All Builders"
+                                    : builderFilter}
+                                </span>
+                                <ChevronRight
+                                  size={14}
+                                  className={`rotate-90 transition-transform duration-200 ${isBuilderDropdownOpen ? "rotate-270" : ""} text-text-dim`}
+                                />
+                              </button>
+                              <AnimatePresence>
+                                {isBuilderDropdownOpen && (
+                                  <motion.div
+                                    initial={{ opacity: 0, scale: 0.95, y: 5 }}
+                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                    exit={{ opacity: 0, scale: 0.95, y: 5 }}
+                                    transition={{ duration: 0.1 }}
+                                    className="absolute left-0 right-0 top-full mt-2 bg-surface border border-border-dim rounded-xl shadow-xl z-50 p-1 max-h-52 overflow-y-auto custom-scrollbar space-y-0.5"
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setBuilderFilter("All");
+                                        setIsBuilderDropdownOpen(false);
+                                      }}
+                                      className={`w-full text-left px-3 py-1.5 text-xs rounded-lg transition-colors flex items-center justify-between ${builderFilter === "All" ? "bg-amber-primary text-bg font-bold" : "text-text-dim hover:text-text-primary hover:bg-surface-2"}`}
+                                    >
+                                      <span>All Builders</span>
+                                      {builderFilter === "All" && <Check size={10} />}
+                                    </button>
+                                    {Array.from(
+                                      new Set(
+                                        [...projects.map((p) => p.builderName), ...resaleProperties.map((r) => r.builderName)].filter(Boolean)
+                                      ),
+                                    ).map((name) => (
+                                      <button
+                                        type="button"
+                                        key={name}
+                                        onClick={() => {
+                                          setBuilderFilter(name);
+                                          setIsBuilderDropdownOpen(false);
+                                        }}
+                                        className={`w-full text-left px-3 py-1.5 text-xs rounded-lg transition-colors flex items-center justify-between ${builderFilter === name ? "bg-amber-primary text-bg font-bold" : "text-text-dim hover:text-text-primary hover:bg-surface-2"}`}
+                                      >
+                                        <span>{name}</span>
+                                        {builderFilter === name && <Check size={10} />}
+                                      </button>
+                                    ))}
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </div>
+                          </div>
+
+                          {/* Possession Status Filter Card */}
+                          <div className="space-y-3 bg-surface-2/40 border border-border-bright p-4 rounded-2xl">
+                            <div className="flex items-center gap-2 text-amber-primary">
+                              <Clock size={14} className="opacity-90" />
+                              <span className="text-[9px] font-black uppercase tracking-widest">
+                                Possession Phase
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {[
+                                "All",
+                                "Ready to Move",
+                                "Under Construction",
+                                "New Launch",
+                              ].map((status) => {
+                                const isSel = possessionFilter.includes(status);
+                                return (
+                                  <button
+                                    key={status}
+                                    onClick={() => togglePossessionFilter(status)}
+                                    className={`px-2.5 py-1.5 rounded-lg text-[9px] border transition-all font-bold ${
+                                      isSel
+                                        ? "bg-amber-primary border-amber-primary text-bg shadow-sm"
+                                        : "bg-surface-2 border-border-bright text-text-dim hover:border-amber-primary/50 hover:bg-surface-3/30"
+                                    }`}
+                                  >
+                                    {status}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* BHK Size Filter Card */}
+                          <div className="space-y-3 bg-surface-2/40 border border-border-bright p-4 rounded-2xl">
+                            <div className="flex items-center gap-2 text-amber-primary">
+                              <Layers size={14} className="opacity-90" />
+                              <span className="text-[9px] font-black uppercase tracking-widest">
+                                Configuration
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {["1 BHK", "2 BHK", "3 BHK", "4 BHK", "5 BHK"].map((bhk) => {
+                                const isSel = configurationFilter.includes(bhk);
+                                return (
+                                  <button
+                                    key={bhk}
+                                    type="button"
+                                    onClick={() => toggleConfigurationFilter(bhk)}
+                                    className={`px-2.5 py-1.5 rounded-lg text-[9px] border transition-all font-bold ${
+                                      isSel
+                                        ? "bg-amber-primary border-amber-primary text-bg shadow-sm"
+                                        : "bg-surface-2 border-border-bright text-text-dim hover:border-amber-primary/50 hover:bg-surface-3/30"
+                                    }`}
+                                  >
+                                    {bhk}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Price Range Filter Card */}
+                          <div className="space-y-3 bg-surface-2/40 border border-border-bright p-4 rounded-2xl">
+                            <div className="flex items-center gap-2 text-amber-primary">
+                              <IndianRupee size={14} className="opacity-90" />
+                              <span className="text-[9px] font-black uppercase tracking-widest">
+                                Price (Lakhs)
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="space-y-1">
+                                <span className="text-[8px] text-text-dim uppercase font-black">
+                                  Min Value
+                                </span>
+                                <input
+                                  type="number"
+                                  value={priceRangeFilter[0] / 100000}
+                                  onChange={(e) =>
+                                    setPriceRangeFilter([
+                                      Number(e.target.value) * 100000,
+                                      priceRangeFilter[1],
+                                    ])
+                                  }
+                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-2 py-1.5 text-xs text-text-primary outline-none focus:border-amber-primary font-mono font-bold"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <span className="text-[8px] text-text-dim uppercase font-black">
+                                  Max Value
+                                </span>
+                                <input
+                                  type="number"
+                                  value={priceRangeFilter[1] / 100000}
+                                  onChange={(e) =>
+                                    setPriceRangeFilter([
+                                      priceRangeFilter[0],
+                                      Number(e.target.value) * 100000,
+                                    ])
+                                  }
+                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-2 py-1.5 text-xs text-text-primary outline-none focus:border-amber-primary font-mono font-bold"
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Area Range Filter Card */}
+                          <div className="space-y-3 bg-surface-2/40 border border-border-bright p-4 rounded-2xl">
+                            <div className="flex items-center gap-2 text-amber-primary">
+                              <Maximize2 size={14} className="opacity-90" />
+                              <span className="text-[9px] font-black uppercase tracking-widest">
+                                Area Size (Sq.Ft.)
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="space-y-1">
+                                <span className="text-[8px] text-text-dim uppercase font-black">
+                                  Min Area
+                                </span>
+                                <input
+                                  type="number"
+                                  value={areaRangeFilter[0]}
+                                  onChange={(e) =>
+                                    setAreaRangeFilter([
+                                      Number(e.target.value),
+                                      areaRangeFilter[1],
+                                    ])
+                                  }
+                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-2 py-1.5 text-xs text-text-primary outline-none focus:border-amber-primary font-mono font-bold"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <span className="text-[8px] text-text-dim uppercase font-black">
+                                  Max Area
+                                </span>
+                                <input
+                                  type="number"
+                                  value={areaRangeFilter[1]}
+                                  onChange={(e) =>
+                                    setAreaRangeFilter([
+                                      areaRangeFilter[0],
+                                      Number(e.target.value),
+                                    ])
+                                  }
+                                  className="w-full bg-surface-2 border border-border-bright rounded-lg px-2 py-1.5 text-xs text-text-primary outline-none focus:border-amber-primary font-mono font-bold"
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Bathrooms Filter Card */}
+                          <div className="space-y-3 bg-surface-2/40 border border-border-bright p-4 rounded-2xl">
+                            <div className="flex items-center gap-2 text-amber-primary">
+                              <Bath size={14} className="opacity-90" />
+                              <span className="text-[9px] font-black uppercase tracking-widest">
+                                Bathrooms
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {[1, 2, 3, 4, 5].map((count) => {
+                                const isSel = bathroomsFilter.includes(count);
+                                return (
+                                  <button
+                                    key={count}
+                                    onClick={() => toggleBathroomFilter(count)}
+                                    className={`w-8 h-8 rounded-lg text-[10px] border flex items-center justify-center transition-all font-black ${
+                                      isSel
+                                        ? "bg-amber-primary border-amber-primary text-bg shadow-sm"
+                                        : "bg-surface-2 border-border-bright text-text-dim hover:border-amber-primary/50 hover:bg-surface-3/30"
+                                    }`}
+                                  >
+                                    {count}+
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Bottom Row Glow and Reset Action */}
+                          <div className="col-span-full pt-4 border-t border-border-dim/30 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPriceRangeFilter([0, 1000000000]);
+                                setAreaRangeFilter([0, 100000]);
+                                setUnitsRangeFilter([0, 10000]);
+                                setPossessionFilter(["All"]);
+                                setBathroomsFilter([]);
+                                setConfigurationFilter([]);
+                                setAssignedToFilter("All");
+                                setBuilderFilter("All");
+                              }}
+                              className="text-[10px] bg-red-500/10 border border-red-500/25 hover:bg-red-500 hover:text-white transition-all text-red-500 px-4 py-2 rounded-xl font-black uppercase tracking-widest"
+                            >
+                              Reset Active Filters
+                            </button>
+                          </div>
+                        </motion.div>
+                      )}
+
+                      <AnimatePresence mode="popLayout">
                         {viewMode === "map" ? (
                           <motion.div
                             key="map"
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -10 }}
-                            transition={{ duration: 0.2 }}
+                            initial={{ opacity: 0, scale: 0.98 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.98 }}
+                            transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
                             className="w-full"
                           >
                             <ProjectMapView
-                              items={resaleProperties.filter(
-                                (p) =>
-                                  (p.propertyHolderName
-                                    .toLowerCase()
-                                    .includes(searchQuery.toLowerCase()) ||
-                                    p.societyName
-                                      .toLowerCase()
-                                      .includes(searchQuery.toLowerCase()) ||
-                                    p.location
-                                      .toLowerCase()
-                                      .includes(searchQuery.toLowerCase())) &&
-                                  (statusFilter.includes("All") ||
-                                    statusFilter.includes(p.status)),
-                              )}
+                              items={resaleProperties.filter(matchesResaleFilters)}
                               onSelectItem={(id) => {
                                 const p = resaleProperties.find(
                                   (prop) => prop.id === id,
@@ -12260,29 +15530,16 @@ export default function App() {
                         ) : viewMode === "grid" ? (
                           <motion.div
                             key="grid"
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -10 }}
-                            transition={{ duration: 0.2 }}
+                            initial={{ opacity: 0, scale: 0.98 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.98 }}
+                            transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
                             className="w-full"
                           >
                             <motion.div layout className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,290px),1fr))] gap-6">
                               <AnimatePresence mode="popLayout">
                                 {resaleProperties
-                                  .filter(
-                                    (p) =>
-                                      (p.propertyHolderName
-                                        .toLowerCase()
-                                        .includes(searchQuery.toLowerCase()) ||
-                                        p.societyName
-                                          .toLowerCase()
-                                          .includes(searchQuery.toLowerCase()) ||
-                                        p.location
-                                          .toLowerCase()
-                                          .includes(searchQuery.toLowerCase())) &&
-                                      (statusFilter.includes("All") ||
-                                        statusFilter.includes(p.status)),
-                                  )
+                                  .filter(matchesResaleFilters)
                                   .map((p) => (
                                     <motion.div
                                       layout
@@ -12295,17 +15552,7 @@ export default function App() {
                                       className="bg-surface border border-border-dim rounded-2xl overflow-hidden hover:border-amber-primary/50 transition-all cursor-pointer group shadow-sm hover:shadow-xl"
                                     >
                                       <div className="aspect-video bg-surface-2 relative overflow-hidden">
-                                        {p.images && p.images.length > 0 ? (
-                                          <img
-                                            src={p.images[0].data}
-                                            alt={p.societyName}
-                                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                                          />
-                                        ) : (
-                                          <div className="w-full h-full flex items-center justify-center text-text-dim/20">
-                                            <Home size={48} />
-                                          </div>
-                                        )}
+                                        <InlineImageCarousel images={p.images} title={p.societyName} heightClass="h-full w-full" />
                                         <div className="absolute top-3 right-3 bg-bg/80 px-2 py-1 rounded-lg text-[10px] font-bold text-amber-primary border border-border-dim uppercase tracking-wider">
                                           {(p.propertyType || "")
                                             .replace("FLATS", "Apartments")
@@ -12341,11 +15588,11 @@ export default function App() {
                         ) : (
                           <motion.div
                             key="table"
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -10 }}
-                            transition={{ duration: 0.2 }}
-                            className="bg-surface/50 backdrop-blur-xl border border-border-dim/50 rounded-[32px] overflow-hidden shadow-[0_32px_64px_-16px_rgba(0,0,0,0.3)] relative group/container"
+                            initial={{ opacity: 0, scale: 0.98 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.98 }}
+                            transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
+                            className="hidden md:block bg-surface/50 backdrop-blur-xl border border-border-dim/50 rounded-[32px] overflow-hidden shadow-[0_32px_64px_-16px_rgba(0,0,0,0.3)] relative group/container"
                           >
                             {/* Decorative background effects */}
                             <div className="absolute -top-32 -right-32 w-96 h-96 bg-amber-primary/5 rounded-full blur-[120px] pointer-events-none" />
@@ -12398,33 +15645,7 @@ export default function App() {
                               </thead>
                               <tbody className="divide-y divide-border-dim/10">
                                 {(() => {
-                                  const filtered = resaleProperties.filter(
-                                    (p) =>
-                                      (p.propertyHolderName
-                                        .toLowerCase()
-                                        .includes(searchQuery.toLowerCase()) ||
-                                        p.societyName
-                                          .toLowerCase()
-                                          .includes(
-                                            searchQuery.toLowerCase(),
-                                          ) ||
-                                        p.propertyType
-                                          .toLowerCase()
-                                          .includes(
-                                            searchQuery.toLowerCase(),
-                                          ) ||
-                                        p.location
-                                          .toLowerCase()
-                                          .includes(
-                                            searchQuery.toLowerCase(),
-                                          )) &&
-                                      (statusFilter.includes("All") ||
-                                        statusFilter.includes(p.status)) &&
-                                      (possessionFilter.includes("All") ||
-                                        possessionFilter.includes(
-                                          p.possessionStatus,
-                                        )),
-                                  );
+                                  const filtered = resaleProperties.filter(matchesResaleFilters);
 
                                   if (filtered.length === 0) {
                                     return (
@@ -12600,10 +15821,9 @@ export default function App() {
                                                 ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-500 shadow-emerald-500/10 shadow-sm"
                                                 : p.status === "Sold"
                                                   ? "border-blue-500/30 bg-blue-500/5 text-blue-500 shadow-blue-500/10 shadow-sm"
-                                                  : p.status ===
-                                                      "PENDING_DELETE"
-                                                    ? "border-red-500/30 bg-red-500/5 text-red-500 shadow-red-500/10 shadow-sm"
-                                                    : "border-amber-500/30 bg-amber-500/5 text-amber-500 shadow-amber-500/10 shadow-sm"
+                                                  : p.status === "PENDING_DELETE"
+                                                    ? "border-red-500/50 bg-red-500/15 text-red-400 shadow-red-500/10 shadow-sm animate-breathe"
+                                                    : "border-amber-500/60 bg-amber-500/20 text-amber-300 shadow-amber-500/15 shadow-sm animate-breathe"
                                             }`}
                                           >
                                             <div
@@ -12612,7 +15832,9 @@ export default function App() {
                                                   ? "bg-emerald-500 animate-pulse"
                                                   : p.status === "Sold"
                                                     ? "bg-blue-500"
-                                                    : "bg-amber-500"
+                                                    : p.status === "PENDING_DELETE"
+                                                      ? "bg-red-400 animate-pulse"
+                                                      : "bg-amber-400 animate-breathe-dot"
                                               }`}
                                             />
                                             {p.status === "PENDING_DELETE" ? "DECOMMISSIONING" : p.status}
@@ -12672,869 +15894,26 @@ export default function App() {
                   )}
 
                   {activeTab === "media" && (
-                    <motion.div
-                      key="media"
-                      initial={{ opacity: 0, scale: 0.98 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="h-full flex flex-col gap-6 w-full max-w-none"
-                    >
-                      {/* Header Section */}
-                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                        <div>
-                          <h2 className="text-2xl font-bold text-text-primary tracking-tight flex items-center gap-3">
-                            <div className="p-2 bg-amber-primary/10 rounded-lg">
-                              <FolderOpen
-                                className="text-amber-primary"
-                                size={24}
-                              />
-                            </div>
-                            Media Explorer
-                          </h2>
-                          <p className="text-xs text-text-dim mt-1">
-                            Manage and browse project assets across cloud
-                            storage buckets
-                          </p>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={() => setShowFullReport(true)}
-                            className="flex items-center gap-2 px-4 py-2 bg-amber-primary text-bg rounded-xl text-xs font-bold hover:bg-amber-secondary transition-all shadow-lg shadow-amber-primary/20"
-                          >
-                            <Activity size={14} />
-                            Full Report
-                          </button>
-                          <div className="relative group">
-                            <Search
-                              className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim group-focus-within:text-amber-primary transition-colors"
-                              size={14}
-                            />
-                            <input
-                              type="text"
-                              placeholder="Search folders..."
-                              className="bg-surface border border-border-dim rounded-xl pl-9 pr-4 py-2 text-xs outline-none focus:border-amber-primary/50 focus:ring-4 focus:ring-amber-primary/5 w-full md:w-64 transition-all"
-                            />
-                          </div>
-                          <button className="p-2 bg-surface border border-border-dim rounded-xl text-text-dim hover:text-amber-primary transition-all">
-                            <Filter size={18} />
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-1 gap-6 overflow-hidden">
-                        {/* Main Explorer Area */}
-                        <div className="bg-surface/50 border border-border-dim rounded-2xl flex flex-col overflow-hidden flex-1 shadow-2xl shadow-black/20">
-                          <div className="px-6 py-4 border-b border-border-dim flex justify-between items-center bg-surface-2/50">
-                            <div className="flex items-center gap-2 text-[11px] font-bold tracking-wider uppercase">
-                              <button
-                                onClick={() => setSelectedFolder(null)}
-                                className="text-text-dim hover:text-amber-primary transition-colors flex items-center gap-1.5"
-                              >
-                                <LayoutGrid size={14} />
-                                Explorer
-                              </button>
-                              {selectedFolder && (
-                                <>
-                                  <ChevronRight
-                                    size={14}
-                                    className="text-text-dim/30"
-                                  />
-                                  <span className="text-amber-primary truncate max-w-[200px] bg-amber-primary/10 px-2 py-0.5 rounded">
-                                    {
-                                      projects.find(
-                                        (p) => p.id === selectedFolder,
-                                      )?.title
-                                    }
-                                  </span>
-                                </>
-                              )}
-                            </div>
-                            {selectedFolder && (
-                              <button
-                                onClick={() => setSelectedFolder(null)}
-                                className="text-[10px] text-text-dim hover:text-amber-primary uppercase tracking-widest font-bold flex items-center gap-1.5 px-3 py-1.5 bg-surface rounded-lg border border-border-bright transition-all"
-                              >
-                                <ChevronLeft size={12} /> Back to Root
-                              </button>
-                            )}
-                          </div>
-
-                          <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-                            {showFullReport ? (
-                              <div className="space-y-6">
-                                <div className="flex items-center justify-between mb-6">
-                                  <div className="flex items-center gap-3">
-                                    <button
-                                      onClick={() => setShowFullReport(false)}
-                                      className="p-2 hover:bg-surface rounded-full transition-colors text-text-dim hover:text-text-primary"
-                                    >
-                                      <ChevronLeft size={20} />
-                                    </button>
-                                    <h3 className="text-xl font-bold text-text-primary">
-                                      Activity Reports
-                                    </h3>
-                                  </div>
-                                </div>
-                                <LogsView
-                                  logs={logs}
-                                  user={user}
-                                  isLive={true}
-                                  onExport={(exportLogs) => {
-                                    const csvContent =
-                                      "Timestamp,User,Action,Summary\n" +
-                                      exportLogs
-                                        .map(
-                                          (l) =>
-                                            `${new Date(l.timestamp).toLocaleString()},"${l.user}","${l.action}","${l.summary}"`,
-                                        )
-                                        .join("\n");
-                                    const blob = new Blob([csvContent], {
-                                      type: "text/csv;charset=utf-8;",
-                                    });
-                                    const link = document.createElement("a");
-                                    const url = URL.createObjectURL(blob);
-                                    link.setAttribute("href", url);
-                                    link.setAttribute(
-                                      "download",
-                                      `full_report_${new Date().toISOString().split("T")[0]}.csv`,
-                                    );
-                                    link.style.visibility = "hidden";
-                                    document.body.appendChild(link);
-                                    link.click();
-                                    document.body.removeChild(link);
-                                  }}
-                                />
-                              </div>
-                            ) : !selectedFolder ? (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                                {projects.map((p) => (
-                                  <motion.button
-                                    whileHover={{ y: -4, scale: 1.02 }}
-                                    key={p.id}
-                                    onClick={() => setSelectedFolder(p.id)}
-                                    className="flex flex-col items-start p-6 rounded-2xl border border-border-dim bg-surface hover:border-amber-primary/50 hover:shadow-xl hover:shadow-amber-primary/10 transition-all group relative overflow-hidden text-left"
-                                  >
-                                    <div className="absolute -right-10 -top-10 w-32 h-32 bg-amber-primary/5 rounded-full blur-3xl group-hover:bg-amber-primary/15 transition-colors duration-500" />
-
-                                    <div className="flex items-start justify-between w-full mb-6 relative z-10">
-                                      <div className="relative w-10 h-10">
-                                        <Folder
-                                          size={40}
-                                          className="text-amber-primary/70 group-hover:opacity-0 transition-opacity duration-300 absolute top-0 left-0"
-                                        />
-                                        <FolderOpen
-                                          size={40}
-                                          className="text-amber-primary opacity-0 group-hover:opacity-100 transition-opacity duration-300 absolute top-0 left-0"
-                                        />
-                                      </div>
-                                      {p.pdfs && p.pdfs.length > 0 && (
-                                        <div className="bg-amber-primary/10 border border-amber-primary/20 px-2.5 py-1 rounded-full text-[10px] font-black text-amber-primary flex items-center gap-1.5 shadow-sm">
-                                          <FileText size={12} />
-                                          {p.pdfs.length}
-                                        </div>
-                                      )}
-                                      {p.images && p.images.length > 0 && (
-                                        <div className="bg-blue-500/10 border border-blue-500/20 px-2.5 py-1 rounded-full text-[10px] font-black text-blue-500 flex items-center gap-1.5 shadow-sm">
-                                          <ImageIcon size={12} />
-                                          {p.images.length}
-                                        </div>
-                                      )}
-                                    </div>
-
-                                    <div className="space-y-1.5 w-full relative z-10">
-                                      <h3 className="text-base font-bold text-text-primary line-clamp-1 group-hover:text-amber-primary transition-colors">
-                                        {p.title}
-                                      </h3>
-                                      <div className="flex items-center gap-2 text-[11px] text-text-dim font-medium">
-                                        <span className="truncate max-w-[120px]">
-                                          {p.builderName || "General"}
-                                        </span>
-                                        <span className="w-1 h-1 rounded-full bg-border-bright" />
-                                        <span className="font-mono uppercase tracking-wider">
-                                          {p.id.slice(0, 6)}
-                                        </span>
-                                      </div>
-                                    </div>
-
-                                    <div className="mt-6 pt-4 border-t border-border-dim/50 w-full flex items-center justify-between relative z-10">
-                                      <div className="flex flex-col gap-1">
-                                        <div className="flex items-center gap-2 text-[10px] text-text-dim uppercase tracking-widest font-bold">
-                                          <Clock size={12} />
-                                          Updated Recently
-                                        </div>
-                                        <div className="text-[9px] text-text-dim/60 font-mono">
-                                          Created:{" "}
-                                          {p.createdAt
-                                            ? new Date(
-                                                p.createdAt,
-                                              ).toLocaleDateString()
-                                            : "N/A"}
-                                        </div>
-                                      </div>
-                                      <div className="w-8 h-8 rounded-full bg-surface-2 flex items-center justify-center group-hover:bg-amber-primary group-hover:text-bg transition-colors">
-                                        <ChevronRight
-                                          size={14}
-                                          className="translate-x-0 group-hover:translate-x-0.5 transition-transform"
-                                        />
-                                      </div>
-                                    </div>
-                                  </motion.button>
-                                ))}
-                              </div>
-                            ) : (
-                              <div className="space-y-6">
-                                {/* Project Actions Header */}
-                                <div className="flex flex-wrap items-center gap-4 bg-surface p-4 rounded-xl border border-border-dim shadow-sm">
-                                  <div className="flex items-center gap-3 pr-4 border-r border-border-dim">
-                                    <div className="p-2 bg-blue-500/10 rounded-lg">
-                                      <Settings
-                                        size={18}
-                                        className="text-blue-500"
-                                      />
-                                    </div>
-                                    <h3 className="text-sm font-bold text-text-primary">
-                                      Project Actions
-                                    </h3>
-                                  </div>
-
-                                  <div className="flex items-center gap-2">
-                                    <button
-                                      onClick={() =>
-                                        setSelectedProject(
-                                          projects.find(
-                                            (p) => p.id === selectedFolder,
-                                          ) || null,
-                                        )
-                                      }
-                                      className="flex items-center gap-2 bg-surface-2 border border-border-bright text-text-primary px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider hover:border-amber-primary hover:text-amber-primary transition-all"
-                                    >
-                                      <Eye size={14} /> View Details
-                                    </button>
-                                    {hasPermission(user, "EDIT_PROJECTS") && user?.role === "admin" && (
-                                      <button
-                                        onClick={() => {
-                                          const p = projects.find(
-                                            (p) => p.id === selectedFolder,
-                                          );
-                                          if (p) {
-                                            setEditingProject(p);
-                                            setIsModalOpen(true);
-                                          }
-                                        }}
-                                          className="flex items-center gap-2 bg-blue-500/10 border border-blue-500/20 text-blue-500 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider hover:bg-blue-500 hover:text-white transition-all"
-                                        >
-                                          <Edit size={14} /> Edit
-                                        </button>
-                                      )}
-                                    {hasPermission(user, "DELETE_PROJECTS") && user?.role === "admin" && (
-                                      <button
-                                        onClick={() => {
-                                          const p = projects.find(
-                                            (p) => p.id === selectedFolder,
-                                          );
-                                          if (p) setProjectToDelete(p);
-                                        }}
-                                          className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 text-red-500 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider hover:bg-red-500 hover:text-white transition-all"
-                                        >
-                                          <Trash2 size={14} /> Delete
-                                        </button>
-                                      )}
-                                    {hasPermission(user, "ADD_PROJECTS") && (
-                                      <button
-                                        onClick={() => {
-                                          setEditingProject(null);
-                                          setIsModalOpen(true);
-                                        }}
-                                        className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 text-green-500 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider hover:bg-green-500 hover:text-white transition-all"
-                                      >
-                                        <Plus size={14} /> Project
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* PDF List Header */}
-                                <div className="flex items-center justify-between bg-surface-2/50 p-4 rounded-xl border border-border-dim">
-                                  <div className="flex items-center gap-3">
-                                    <div className="p-2 bg-amber-primary/10 rounded-lg">
-                                      <FileText
-                                        size={18}
-                                        className="text-amber-primary"
-                                      />
-                                    </div>
-                                    <div>
-                                      <h3 className="text-sm font-bold text-text-primary">
-                                        Project Documents
-                                      </h3>
-                                      <p className="text-[10px] text-text-dim mt-0.5">
-                                        {projects.find(
-                                          (p) => p.id === selectedFolder,
-                                        )?.pdfs?.length || 0}{" "}
-                                        Files available
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <button
-                                    onClick={() =>
-                                      fileInputRef.current?.click()
-                                    }
-                                    className="flex items-center gap-2 bg-amber-primary text-bg px-4 py-2 rounded-lg text-xs font-bold hover:bg-amber-secondary transition-colors shadow-lg shadow-amber-primary/20"
-                                  >
-                                    <Plus size={14} />
-                                    Upload File
-                                  </button>
-                                  <input
-                                    type="file"
-                                    ref={fileInputRef}
-                                    onChange={(e) =>
-                                      handleMediaUpload(e, "pdfs")
-                                    }
-                                    className="hidden"
-                                    accept=".pdf"
-                                  />
-                                </div>
-
-                                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-                                  {(() => {
-                                    const project = projects.find(
-                                      (p) => p.id === selectedFolder,
-                                    );
-                                    if (
-                                      !project ||
-                                      !project.pdfs ||
-                                      project.pdfs.length === 0
-                                    ) {
-                                      return (
-                                        <div className="col-span-full flex flex-col items-center justify-center py-24 text-center bg-surface-2/30 rounded-2xl border-2 border-dashed border-border-dim hover:border-amber-primary/30 hover:bg-surface-2/50 transition-all cursor-pointer group">
-                                          <div className="p-5 bg-surface-3 rounded-full mb-4 group-hover:scale-110 group-hover:bg-amber-primary/10 transition-all">
-                                            <FileQuestion
-                                              size={40}
-                                              className="text-text-dim group-hover:text-amber-primary transition-colors"
-                                            />
-                                          </div>
-                                          <h3 className="text-sm font-bold text-text-primary mb-1">
-                                            No Documents Found
-                                          </h3>
-                                          <p className="text-xs text-text-secondary max-w-[250px] mb-6">
-                                            This project has no uploaded PDF
-                                            documents. Click below or drag and
-                                            drop to upload.
-                                          </p>
-                                          <button
-                                            onClick={() =>
-                                              fileInputRef.current?.click()
-                                            }
-                                            className="px-6 py-2.5 bg-surface border border-border-bright rounded-xl text-xs font-bold text-text-primary hover:border-amber-primary hover:text-amber-primary transition-all shadow-sm"
-                                          >
-                                            Browse Files
-                                          </button>
-                                        </div>
-                                      );
-                                    }
-
-                                    const uniquePdfs: any[] = [];
-                                    const seenNames = new Set();
-                                    project.pdfs.forEach((pdf) => {
-                                      if (!seenNames.has(pdf.name)) {
-                                        seenNames.add(pdf.name);
-                                        uniquePdfs.push(pdf);
-                                      }
-                                    });
-
-                                    return uniquePdfs.map((pdf, idx) => (
-                                      <motion.div
-                                        initial={{ opacity: 0, y: 10 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        transition={{ delay: idx * 0.05 }}
-                                        key={idx}
-                                        className="flex flex-col bg-surface border border-border-bright rounded-xl hover:border-amber-primary/50 hover:shadow-xl hover:shadow-amber-primary/5 transition-all group overflow-hidden relative"
-                                      >
-                                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-red-500/50 to-red-500/10 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                        <div className="p-5 flex items-start gap-4">
-                                          <div className="bg-red-500/10 p-3.5 rounded-xl text-red-500 group-hover:scale-110 group-hover:bg-red-500/20 transition-all shadow-sm">
-                                            <FileText size={24} />
-                                          </div>
-                                          <div className="flex flex-col overflow-hidden flex-1">
-                                            <span
-                                              className="text-sm font-bold text-text-primary truncate group-hover:text-amber-primary transition-colors"
-                                              title={pdf.name}
-                                            >
-                                              {pdf.name}
-                                            </span>
-                                            <div className="flex items-center gap-2 mt-1.5">
-                                              <span className="text-[10px] text-text-dim font-mono bg-surface-2 px-1.5 py-0.5 rounded">
-                                                {(
-                                                  pdf.size /
-                                                  1024 /
-                                                  1024
-                                                ).toFixed(2)}{" "}
-                                                MB
-                                              </span>
-                                              <span className="w-1 h-1 rounded-full bg-border-bright" />
-                                              <span className="text-[10px] text-text-dim uppercase tracking-wider font-bold">
-                                                PDF
-                                              </span>
-                                            </div>
-                                          </div>
-                                        </div>
-                                        <div className="px-4 py-3 bg-surface-2/50 border-t border-border-dim/50 flex items-center justify-between opacity-60 group-hover:opacity-100 transition-opacity">
-                                          <span className="text-[9px] text-text-dim font-mono">
-                                            Added recently
-                                          </span>
-                                          <div className="flex items-center gap-1">
-                                            <button
-                                              className="p-1.5 text-text-dim hover:text-amber-primary hover:bg-amber-primary/10 rounded-md transition-all"
-                                              title="Preview"
-                                            >
-                                              <Eye size={14} />
-                                            </button>
-                                            <button
-                                              onClick={() => {
-                                                const link =
-                                                  document.createElement("a");
-                                                link.href = pdf.data;
-                                                link.download = pdf.name;
-                                                document.body.appendChild(link);
-                                                link.click();
-                                                document.body.removeChild(link);
-                                                showToast(
-                                                  "Downloading document...",
-                                                  "info",
-                                                );
-                                              }}
-                                              className="p-1.5 text-text-dim hover:text-amber-primary hover:bg-amber-primary/10 rounded-md transition-all"
-                                              title="Download"
-                                            >
-                                              <Download size={14} />
-                                            </button>
-                                          </div>
-                                        </div>
-                                      </motion.div>
-                                    ));
-                                  })()}
-                                </div>
-
-                                {/* Images Section */}
-                                <div className="flex items-center justify-between bg-surface-2/30 p-5 rounded-2xl border border-border-dim/50 mt-10 ">
-                                  <div className="flex items-center gap-4">
-                                    <div className="w-10 h-10 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-500 shadow-inner">
-                                      <ImageIcon size={20} />
-                                    </div>
-                                    <div>
-                                      <h3 className="text-sm font-bold text-text-primary tracking-tight">
-                                        Visual Portfolio
-                                      </h3>
-                                      <p className="text-[10px] text-text-dim mt-0.5 font-mono uppercase tracking-widest">
-                                        {projects.find(
-                                          (p) => p.id === selectedFolder,
-                                        )?.images?.length || 0}{" "}
-                                        High-Res Assets
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <button
-                                      onClick={() =>
-                                        imageInputRef.current?.click()
-                                      }
-                                      className="flex items-center gap-2 px-3 py-1.5 bg-amber-primary/10 border border-amber-primary/20 rounded-lg text-[10px] font-bold text-amber-primary hover:bg-amber-primary hover:text-bg transition-all"
-                                    >
-                                      <Plus size={12} />
-                                      Add Image
-                                    </button>
-                                    <input
-                                      type="file"
-                                      ref={imageInputRef}
-                                      onChange={(e) =>
-                                        handleMediaUpload(e, "images")
-                                      }
-                                      className="hidden"
-                                      accept="image/*"
-                                    />
-                                    <button className="flex items-center gap-2 px-3 py-1.5 bg-surface-3 border border-border-bright rounded-lg text-[10px] font-bold text-text-secondary hover:text-text-primary transition-all">
-                                      <Maximize2 size={12} />
-                                      Gallery View
-                                    </button>
-                                  </div>
-                                </div>
-
-                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5 mt-6">
-                                  {(() => {
-                                    const project = projects.find(
-                                      (p) => p.id === selectedFolder,
-                                    );
-                                    if (
-                                      !project ||
-                                      !project.images ||
-                                      project.images.length === 0
-                                    ) {
-                                      return (
-                                        <div className="col-span-full flex flex-col items-center justify-center py-16 text-center bg-surface-2/20 rounded-3xl border-2 border-dashed border-border-dim/50">
-                                          <div className="w-12 h-12 bg-surface-3 rounded-2xl flex items-center justify-center text-text-dim mb-4">
-                                            <ImageIcon size={24} />
-                                          </div>
-                                          <p className="text-[11px] text-text-dim uppercase font-bold tracking-[0.2em]">
-                                            No visual assets
-                                          </p>
-                                        </div>
-                                      );
-                                    }
-                                    return project.images.map((img, idx) => (
-                                      <motion.div
-                                        initial={{ opacity: 0, scale: 0.95 }}
-                                        animate={{ opacity: 1, scale: 1 }}
-                                        transition={{ delay: idx * 0.05 }}
-                                        key={idx}
-                                        className="group relative aspect-[4/3] rounded-2xl overflow-hidden border border-border-bright/50 hover:border-amber-primary/50 transition-all duration-500 shadow-lg hover:shadow-2xl hover:shadow-amber-primary/10"
-                                      >
-                                        <img
-                                          src={img.data}
-                                          alt={img.name}
-                                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out"
-                                        />
-                                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-4">
-                                          <div className="flex items-center justify-between">
-                                            <div className="min-w-0">
-                                              <p className="text-[10px] text-white font-bold truncate">
-                                                {img.name}
-                                              </p>
-                                              <p className="text-[8px] text-white/60 uppercase tracking-widest mt-0.5">
-                                                {(
-                                                  img.size /
-                                                  (1024 * 1024)
-                                                ).toFixed(1)}{" "}
-                                                MB
-                                              </p>
-                                            </div>
-                                            <button
-                                              onClick={() => {
-                                                const link =
-                                                  document.createElement("a");
-                                                link.href = img.data;
-                                                link.download = img.name;
-                                                document.body.appendChild(link);
-                                                link.click();
-                                                document.body.removeChild(link);
-                                              }}
-                                              className="p-2 bg-white/20 rounded-xl text-white hover:bg-amber-primary transition-all"
-                                            >
-                                              <Download size={14} />
-                                            </button>
-                                          </div>
-                                        </div>
-                                      </motion.div>
-                                    ));
-                                  })()}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Persistent Sidebar */}
-                        <div className="hidden xl:flex w-96 flex-col gap-6 overflow-y-auto no-scrollbar">
-                          {/* Builder Info Section */}
-                          <div className="space-y-4">
-                            <h3 className="text-xs font-bold text-text-secondary uppercase tracking-widest flex items-center gap-2">
-                              <Building2
-                                size={14}
-                                className="text-amber-primary"
-                              />
-                              Builder Profile
-                            </h3>
-                            {(() => {
-                              const project = selectedFolder
-                                ? projects.find((p) => p.id === selectedFolder)
-                                : null;
-
-                              if (!project) {
-                                return (
-                                  <div className="bg-surface border border-border-dim rounded-2xl p-6 space-y-5 shadow-xl relative overflow-hidden group">
-                                    <div className="absolute top-0 right-0 w-32 h-32 bg-amber-primary/5 rounded-full -mr-16 -mt-16 blur-3xl group-hover:bg-amber-primary/10 transition-colors" />
-                                    <div className="flex items-center gap-4 relative z-10">
-                                      <div className="w-12 h-12 bg-surface-2 border border-border-bright rounded-2xl flex items-center justify-center text-amber-primary shadow-inner">
-                                        <Building2 size={24} />
-                                      </div>
-                                      <div>
-                                        <h4 className="text-sm font-bold text-text-primary tracking-tight">
-                                          Builder Directory
-                                        </h4>
-                                        <p className="text-[10px] text-text-dim uppercase tracking-[0.2em] font-mono">
-                                          {allBuilders.length} Active Developers
-                                        </p>
-                                      </div>
-                                    </div>
-                                    <div className="space-y-2.5 max-h-[340px] overflow-y-auto custom-scrollbar pr-1 relative z-10">
-                                      {allBuilders.map((builder) => (
-                                        <button
-                                          key={builder}
-                                          onClick={() =>
-                                            setSelectedBuilder(builder)
-                                          }
-                                          className="w-full p-4 bg-surface-2/50 border border-border-bright/50 rounded-2xl flex items-center justify-between group/item hover:border-amber-primary/40 hover:bg-surface-3 transition-all duration-300"
-                                        >
-                                          <div className="flex flex-col items-start">
-                                            <span className="text-[12px] font-bold text-text-secondary group-hover/item:text-amber-primary transition-colors">
-                                              {builder}
-                                            </span>
-                                            <span className="text-[9px] text-text-dim uppercase tracking-widest mt-0.5">
-                                              Premier Partner
-                                            </span>
-                                          </div>
-                                          <div className="flex flex-col items-end">
-                                            <span className="text-[10px] font-mono text-text-primary">
-                                              {
-                                                projects.filter(
-                                                  (p) =>
-                                                    p.builderName === builder,
-                                                ).length
-                                              }
-                                            </span>
-                                            <span className="text-[8px] text-text-dim uppercase">
-                                              Assets
-                                            </span>
-                                          </div>
-                                        </button>
-                                      ))}
-                                    </div>
-                                    <div className="pt-2 border-t border-border-dim/50 flex justify-center">
-                                      <div className="text-[10px] text-text-dim italic flex items-center gap-2">
-                                        <div className="w-1 h-1 rounded-full bg-amber-primary animate-pulse" />
-                                        Select a profile to view portfolio
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              }
-
-                              const builderProjects = projects.filter(
-                                (p) => p.builderName === project.builderName,
-                              );
-
-                              return (
-                                <div className="bg-surface border border-border-dim rounded-2xl p-6 space-y-6 shadow-2xl relative overflow-hidden">
-                                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-amber-primary/50 to-transparent" />
-
-                                  <div className="flex items-start justify-between pb-5 border-b border-border-dim/50">
-                                    <div className="flex items-center gap-4">
-                                      <div className="w-14 h-14 bg-amber-primary/10 border border-amber-primary/20 rounded-2xl flex items-center justify-center text-amber-primary shadow-lg shadow-amber-primary/5">
-                                        <Building2 size={28} />
-                                      </div>
-                                      <div>
-                                        <h4 className="text-lg font-serif font-bold text-text-primary leading-tight">
-                                          {project.builderName}
-                                        </h4>
-                                        <div className="flex items-center gap-2 mt-1">
-                                          <div className="flex items-center gap-1 px-1.5 py-0.5 bg-green-500/10 rounded text-[9px] text-green-500 font-bold uppercase tracking-wider border border-green-500/20">
-                                            <ShieldCheck size={10} />
-                                            Verified
-                                          </div>
-                                          <span className="text-[10px] text-text-dim font-mono">
-                                            EST. 1984
-                                          </span>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  <div className="space-y-4">
-                                    <div className="flex items-center justify-between px-1">
-                                      <h5 className="text-[10px] text-text-dim uppercase tracking-[0.2em] font-bold">
-                                        Active Portfolio
-                                      </h5>
-                                      <div className="flex items-center gap-1.5">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-amber-primary" />
-                                        <span className="text-[10px] font-mono text-text-primary">
-                                          {builderProjects.length} Units
-                                        </span>
-                                      </div>
-                                    </div>
-
-                                    <div className="space-y-2.5 max-h-[280px] overflow-y-auto custom-scrollbar pr-1">
-                                      {builderProjects.map((bp) => (
-                                        <button
-                                          key={bp.id}
-                                          onClick={() =>
-                                            setSelectedFolder(bp.id)
-                                          }
-                                          className={`w-full text-left p-4 rounded-2xl text-[12px] transition-all duration-300 flex items-center justify-between group border ${
-                                            bp.id === selectedFolder
-                                              ? "bg-amber-primary/10 text-amber-primary border-amber-primary/30 shadow-lg shadow-amber-primary/5"
-                                              : "bg-surface-2/50 hover:bg-surface-3 text-text-secondary border-border-bright/50 hover:border-amber-primary/20"
-                                          }`}
-                                        >
-                                          <div className="flex items-center gap-4 overflow-hidden">
-                                            <div
-                                              className={`w-2 h-2 rounded-full shadow-sm ${bp.status === "Active" ? "bg-green-500 shadow-green-500/50" : "bg-amber-500 shadow-amber-500/50"}`}
-                                            />
-                                            <div className="flex flex-col overflow-hidden">
-                                              <span className="truncate font-bold tracking-tight">
-                                                {bp.title}
-                                              </span>
-                                              <span className="text-[9px] text-text-dim uppercase tracking-widest mt-0.5">
-                                                {bp.location.split(",")[1] ||
-                                                  bp.location}
-                                              </span>
-                                            </div>
-                                          </div>
-                                          <div
-                                            className={`p-1.5 rounded-lg transition-all ${bp.id === selectedFolder ? "bg-amber-primary text-surface rotate-0" : "bg-surface-3 text-text-dim opacity-0 group-hover:opacity-100 -rotate-90"}`}
-                                          >
-                                            <ChevronRight size={14} />
-                                          </div>
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
-
-                                  <div className="grid grid-cols-2 gap-3">
-                                    <button
-                                      onClick={() =>
-                                        setSelectedBuilder(project.builderName!)
-                                      }
-                                      className="py-3 bg-surface-2 border border-border-bright rounded-2xl text-[10px] font-bold text-text-primary uppercase tracking-widest hover:border-amber-primary hover:bg-surface-3 transition-all flex items-center justify-center gap-2 shadow-sm"
-                                    >
-                                      <Globe
-                                        size={14}
-                                        className="text-amber-primary"
-                                      />
-                                      Website
-                                    </button>
-                                    <button className="py-3 bg-amber-primary text-surface rounded-2xl text-[10px] font-bold uppercase tracking-widest hover:bg-amber-secondary transition-all flex items-center justify-center gap-2 shadow-lg shadow-amber-primary/20">
-                                      <Mail size={14} />
-                                      Contact
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            })()}
-                          </div>
-
-                          {/* Intelligence Section */}
-                          <div className="space-y-4">
-                            <h3 className="text-xs font-bold text-text-secondary uppercase tracking-[0.2em] flex items-center gap-2">
-                              <Activity
-                                size={14}
-                                className="text-amber-primary"
-                              />
-                              Market Intelligence
-                            </h3>
-                            {(() => {
-                              const project = selectedFolder
-                                ? projects.find((p) => p.id === selectedFolder)
-                                : null;
-
-                              const relatedReports = project
-                                ? reports.filter(
-                                    (r) =>
-                                      r.title
-                                        .toLowerCase()
-                                        .includes(
-                                          project.title.toLowerCase(),
-                                        ) ||
-                                      r.content
-                                        .toLowerCase()
-                                        .includes(project.title.toLowerCase()),
-                                  )
-                                : reports.slice(0, 5);
-
-                              return (
-                                <div className="bg-surface border border-border-dim rounded-2xl p-6 space-y-6 shadow-xl relative overflow-hidden">
-                                  <div className="absolute top-0 right-0 w-full h-full bg-[radial-gradient(circle_at_100%_0%,rgba(245,158,11,0.03)_0%,transparent_50%)]" />
-
-                                  <div className="flex items-center justify-between pb-4 border-b border-border-dim/50 relative z-10">
-                                    <p className="text-[10px] text-text-dim uppercase tracking-[0.15em] font-bold">
-                                      {project
-                                        ? "Project Insights"
-                                        : "Global Intelligence"}
-                                    </p>
-                                    <div className="flex items-center gap-2">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-amber-primary animate-pulse" />
-                                      <span className="text-[10px] font-mono text-text-primary">
-                                        {relatedReports.length} Signals
-                                      </span>
-                                    </div>
-                                  </div>
-
-                                  {relatedReports.length === 0 ? (
-                                    <div className="py-16 text-center bg-surface-2/20 rounded-2xl border border-border-dim/50 border-dashed relative z-10">
-                                      <ClipboardList
-                                        size={28}
-                                        className="text-text-dim/20 mx-auto mb-3"
-                                      />
-                                      <p className="text-[11px] text-text-dim/60 uppercase tracking-widest font-bold">
-                                        No signals detected
-                                      </p>
-                                    </div>
-                                  ) : (
-                                    <div className="space-y-4 max-h-[380px] overflow-y-auto custom-scrollbar pr-1 relative z-10">
-                                      {relatedReports.map((report) => (
-                                        <div
-                                          key={report.id}
-                                          className="bg-surface-2/50 border border-border-bright/50 p-4 rounded-2xl hover:border-amber-primary/30 hover:bg-surface-3 transition-all duration-300 group"
-                                        >
-                                          <div className="flex items-start justify-between mb-4">
-                                            <div className="flex flex-col gap-1.5 min-w-0">
-                                              <div className="flex items-center gap-2">
-                                                <div
-                                                  className={`w-1.5 h-1.5 rounded-full ${
-                                                    report.status === "Final"
-                                                      ? "bg-green-500"
-                                                      : "bg-amber-500"
-                                                  }`}
-                                                />
-                                                <span className="text-[12px] font-bold text-text-primary truncate group-hover:text-amber-primary transition-colors">
-                                                  {report.title}
-                                                </span>
-                                              </div>
-                                              <div className="flex items-center gap-2 ml-3.5">
-                                                <span className="text-[9px] text-text-dim font-mono uppercase">
-                                                  {new Date(
-                                                    report.createdAt,
-                                                  ).toLocaleDateString(
-                                                    "en-US",
-                                                    {
-                                                      month: "short",
-                                                      day: "numeric",
-                                                      year: "numeric",
-                                                    },
-                                                  )}
-                                                </span>
-                                                <span className="w-1 h-1 rounded-full bg-border-bright" />
-                                                <span className="text-[9px] text-text-dim uppercase tracking-widest font-bold">
-                                                  {report.status}
-                                                </span>
-                                              </div>
-                                            </div>
-                                          </div>
-                                          <button
-                                            onClick={() => {
-                                              setSelectedReport(report);
-                                              setIsReportEditing(false);
-                                              setActiveTab("reports");
-                                            }}
-                                            className="w-full py-2.5 bg-surface-3 border border-border-bright rounded-xl text-[10px] font-bold text-text-secondary hover:text-amber-primary hover:border-amber-primary/40 transition-all uppercase tracking-[0.15em] flex items-center justify-center gap-2"
-                                          >
-                                            <Eye size={12} />
-                                            Analyze Data
-                                          </button>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-
-                                  <div className="pt-2 relative z-10">
-                                    <button className="w-full py-3 bg-surface-2/50 border border-border-dim/50 rounded-2xl text-[10px] font-bold text-text-dim uppercase tracking-widest hover:text-text-primary hover:bg-surface-3 transition-all">
-                                      View Intelligence Feed
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            })()}
-                          </div>
-                        </div>
-                      </div>
-                    </motion.div>
+                    <MediaExplorer
+                      projects={projects}
+                      user={user}
+                      reports={reports}
+                      logs={logs}
+                      hasPermission={hasPermission}
+                      setSelectedProject={setSelectedProject}
+                      setEditingProject={setEditingProject}
+                      setIsModalOpen={setIsModalOpen}
+                      setProjectToDelete={setProjectToDelete}
+                      setSelectedBuilder={setSelectedBuilder}
+                      setActiveTab={setActiveTab}
+                      setSelectedReport={setSelectedReport}
+                      setIsReportEditing={setIsReportEditing}
+                      request={request}
+                      showToast={showToast}
+                      playSound={playSound}
+                      setProjects={setProjects}
+                      LogsViewComponent={LogsView}
+                    />
                   )}
 
                   {activeTab === "approvals" && (
@@ -13555,7 +15934,7 @@ export default function App() {
                               opacity: 0,
                               x:
                                 completingTaskId?.id === a.id
-                                  ? completingTaskId?.action === "approve"
+                                  ? completingTaskId.action === "approve"
                                     ? 20
                                     : -20
                                   : 0,
@@ -13565,7 +15944,7 @@ export default function App() {
                             transition={{ duration: 0.35, ease: "anticipate" }}
                             className={`relative bg-surface border border-border-dim p-6 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 overflow-hidden transition-colors duration-500 ${
                               completingTaskId?.id === a.id
-                                ? completingTaskId?.action === "approve"
+                                ? completingTaskId.action === "approve"
                                   ? "bg-green-500/5 border-green-500/30"
                                   : "bg-red-500/5 border-red-500/30"
                                 : ""
@@ -13583,9 +15962,9 @@ export default function App() {
                                   <motion.div
                                     initial={{ scale: 0 }}
                                     animate={{ scale: 1.2 }}
-                                    className={`p-4 rounded-full ${completingTaskId?.action === "approve" ? "bg-green-500 text-white shadow-[0_0_20px_rgba(34,197,94,0.4)]" : "bg-red-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.4)]"}`}
+                                    className={`p-4 rounded-full ${completingTaskId.action === "approve" ? "bg-green-500 text-white shadow-[0_0_20px_rgba(34,197,94,0.4)]" : "bg-red-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.4)]"}`}
                                   >
-                                    {completingTaskId?.action === "approve" ? (
+                                    {completingTaskId.action === "approve" ? (
                                       <Check size={32} strokeWidth={3} />
                                     ) : (
                                       <X size={32} strokeWidth={3} />
@@ -13599,27 +15978,35 @@ export default function App() {
                               <div className="flex flex-wrap items-center gap-2">
                                 <span
                                   className={`text-[8px] px-2 py-0.5 rounded-full border font-black uppercase tracking-widest ${
-                                    a.type === "Edit Request"
-                                      ? "border-amber-500/30 bg-amber-500/10 text-amber-500"
-                                      : a.type === "New Project Approval"
-                                        ? "border-green-500/30 bg-green-500/10 text-green-500"
-                                        : "border-red-500/30 bg-red-500/10 text-red-500"
+                                    a.type === "User Registration Approval" || a.type === "User Registration" || a.type === "New User Registration"
+                                      ? "border-purple-500/30 bg-purple-500/10 text-purple-400"
+                                      : a.type === "Edit Request"
+                                        ? "border-amber-500/30 bg-amber-500/10 text-amber-500"
+                                        : a.type === "New Project Approval"
+                                          ? "border-green-500/30 bg-green-500/10 text-green-500"
+                                          : "border-red-500/30 bg-red-500/10 text-red-500"
                                   }`}
                                 >
-                                  {a.type || "Deletion Request"}
+                                  {a.type === "User Registration Approval" ? "User Registration" : a.type || "Deletion Request"}
                                 </span>
+                                {(!a.status || a.status === "Pending" || a.status === "Pending Approval") && (
+                                  <span className="inline-flex items-center gap-1.5 text-[8px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-amber-500/60 bg-amber-500/20 text-amber-300 shadow-sm animate-breathe">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-breathe-dot" />
+                                    <span>Pending Approval</span>
+                                  </span>
+                                )}
                                 <div className="text-sm font-bold text-text-primary">
-                                  {a.projectTitle}
+                                  {a.projectTitle || (a.userName ? `${a.userName} (${a.userEmail || a.userRole || "User"})` : "User Registration")}
                                 </div>
                               </div>
                               <div className="text-[10px] text-text-dim uppercase tracking-widest">
                                 Requested by {a.requestedBy} ·{" "}
                                 {new Date(a.requestedAt).toLocaleString()}
                               </div>
-                              {a.type === "Edit Request" && a.details && (
+                              {(a.type === "Edit Request" || a.type === "User Registration Approval" || a.type === "User Registration" || a.type === "New User Registration") && a.details && (
                                 <div className="mt-2 p-3 bg-surface-2 rounded-xl border border-border-bright text-xs text-text-secondary leading-relaxed font-semibold max-w-xl">
                                   <span className="font-extrabold text-text-primary block text-[9px] uppercase tracking-wider mb-1 text-amber-500">
-                                    Suggested Correction / Reported Mistake:
+                                    {a.type?.includes("User") ? "Registration Details:" : "Suggested Correction / Reported Mistake:"}
                                   </span>
                                   {a.details}
                                 </div>
@@ -13699,303 +16086,841 @@ export default function App() {
                       user?.role === "team_leader") && (
                       <motion.div
                         key="users"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        className="space-y-4 w-full"
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3 }}
+                        className="space-y-3.5 w-full font-sans"
                       >
-                        {teamFilter && (
-                          <div className="flex items-center gap-2 p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl">
-                            <UsersIcon size={16} className="text-purple-500" />
-                            <span className="text-xs text-text-primary">
-                              Viewing team members for{" "}
-                              <span className="font-bold">
-                                {users.find((u) => u.id === teamFilter)?.name}
-                              </span>
-                            </span>
-                            <button
-                              onClick={() => setTeamFilter(null)}
-                              className="ml-auto text-[10px] font-bold uppercase tracking-widest text-purple-500 hover:text-purple-400"
-                            >
-                              Clear Filter
-                            </button>
-                          </div>
-                        )}
-                        <div className="flex justify-end gap-4">
-                          {hasPermission(user, "MANAGE_TEAM") && (
-                            <button
-                              onClick={() => {
-                                setSelectedUsersForTeam([]);
-                                setIsBuildTeamModalOpen(true);
-                              }}
-                              className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-purple-500 hover:text-purple-400 transition-colors"
-                            >
-                              <UsersIcon size={14} />
-                              <span>Build Team</span>
-                            </button>
-                          )}
-                        </div>
+                        {/* Summary Cards & Controls */}
+                        {(() => {
+                          const totalMembers = users.length;
+                          const totalAdmins = users.filter((u) => u.role === "admin").length;
+                          const totalLeaders = users.filter((u) => u.role === "team_leader").length;
+                          const totalActiveNow = users.filter((u) => u.lastActive && (new Date().getTime() - new Date(u.lastActive).getTime() < 300000)).length;
 
-                        <div className="bg-surface/50 backdrop-blur-xl border border-border-dim/50 rounded-3xl overflow-hidden shadow-[0_16px_48px_-12px_rgba(0,0,0,0.2)] relative group/container">
-                          {/* Decorative background effects */}
-                          <div className="absolute -top-32 -right-32 w-96 h-96 bg-amber-primary/5 rounded-full blur-[120px] pointer-events-none" />
-                          <div className="absolute -bottom-32 -left-32 w-96 h-96 bg-blue-500/5 rounded-full blur-[120px] pointer-events-none" />
+                          const filtered = users.filter((u) => {
+                            const matchesSearch =
+                              u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                              u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                              u.role.toLowerCase().includes(searchQuery.toLowerCase());
+                            const matchesTeam = !teamFilter || u.teamLeaderId === teamFilter;
+                            const matchesRole = userRoleFilter === "all" || u.role === userRoleFilter;
+                            return matchesSearch && matchesTeam && matchesRole;
+                          });
 
-                          <div className="overflow-x-auto no-scrollbar relative z-10">
-                            <table className="w-full text-left border-separate border-spacing-0 min-w-[1000px]">
-                              <thead>
-                                <tr className="bg-surface-2/40 backdrop-blur-md">
-                                  <th className="px-4 py-3 text-[9px] text-text-dim uppercase tracking-[0.3em] font-black border-b border-border-dim/50 first:rounded-tl-3xl whitespace-nowrap group/th cursor-help">
-                                    <div className="flex items-center gap-2">
-                                      <div className="w-1.5 h-1.5 rounded-full bg-amber-primary group-hover/th:animate-ping" />
-                                      <span>Identification</span>
-                                    </div>
-                                  </th>
-                                  <th className="px-4 py-3 text-[9px] text-text-dim uppercase tracking-[0.3em] font-black border-b border-border-dim/50 whitespace-nowrap group/th cursor-help">
-                                    <div className="flex items-center gap-2">
-                                      <div className="w-1.5 h-1.5 rounded-full bg-blue-500 group-hover/th:animate-ping" />
-                                      <span>Secure Channels</span>
-                                    </div>
-                                  </th>
-                                  <th className="px-4 py-3 text-[9px] text-text-dim uppercase tracking-[0.3em] font-black border-b border-border-dim/50 whitespace-nowrap group/th cursor-help">
-                                    <div className="flex items-center gap-2">
-                                      <div className="w-1.5 h-1.5 rounded-full bg-purple-500 group-hover/th:animate-ping" />
-                                      <span>Authority Level</span>
-                                    </div>
-                                  </th>
-                                  <th className="px-4 py-3 text-[9px] text-text-dim uppercase tracking-[0.3em] font-black text-right border-b border-border-dim/50 last:rounded-tr-3xl whitespace-nowrap">
-                                    Control
-                                  </th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-border-dim/10">
-                                {(() => {
-                                  const filtered = users.filter(
-                                    (u) =>
-                                      (u.name
-                                        .toLowerCase()
-                                        .includes(searchQuery.toLowerCase()) ||
-                                        u.email
-                                          .toLowerCase()
-                                          .includes(
-                                            searchQuery.toLowerCase(),
-                                          ) ||
-                                        u.role
-                                          .toLowerCase()
-                                          .includes(
-                                            searchQuery.toLowerCase(),
-                                          )) &&
-                                      (!teamFilter ||
-                                        u.teamLeaderId === teamFilter),
-                                  );
+                          const totalPages = Math.max(1, Math.ceil(filtered.length / userPageSize));
+                          const safePage = Math.min(userPage, totalPages);
+                          const startIndex = (safePage - 1) * userPageSize;
+                          const paginatedUsers = filtered.slice(startIndex, startIndex + userPageSize);
 
-                                  if (filtered.length === 0) {
-                                    return (
-                                      <tr>
-                                        <td
-                                          colSpan={4}
-                                          className="p-32 text-center"
-                                        >
-                                          <div className="flex flex-col items-center gap-6 max-w-sm mx-auto">
-                                            <div className="w-24 h-24 bg-surface-2 rounded-full flex items-center justify-center text-text-dim/20 border border-border-dim/50 shadow-inner group/empty">
-                                              <Search
-                                                size={48}
-                                                className="group-hover/empty:scale-110 transition-transform"
-                                              />
-                                            </div>
-                                            <div className="space-y-2">
-                                              <h4 className="text-sm font-bold text-text-primary uppercase tracking-[0.4em]">
-                                                Null Result Vector
-                                              </h4>
-                                              <p className="text-[10px] text-text-dim font-medium leading-relaxed opacity-60 uppercase tracking-widest">
-                                                {searchQuery
-                                                  ? `No records found matching unique identifier "${searchQuery}"`
-                                                  : "The system registry is currently devoid of member data."}
-                                              </p>
-                                            </div>
-                                          </div>
-                                        </td>
-                                      </tr>
-                                    );
-                                  }
+                          return (
+                            <>
+                              {/* Top Stat Summary Grid */}
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                                <div className="p-3 rounded-2xl bg-surface/50 backdrop-blur-xl border border-border-dim/50 flex items-center gap-3 shadow-sm">
+                                  <div className="p-2 rounded-xl bg-amber-primary/10 text-amber-primary border border-amber-primary/20 shrink-0">
+                                    <UsersIcon size={16} />
+                                  </div>
+                                  <div className="flex flex-col min-w-0">
+                                    <span className="text-[9px] uppercase font-black text-text-dim tracking-wider">Total Members</span>
+                                    <span className="text-sm font-black text-text-primary font-mono">{totalMembers}</span>
+                                  </div>
+                                </div>
 
-                                  return filtered.map((u, index) => (
-                                    <tr
-                                      key={u.id}
-                                      className="group transition-all duration-500 hover:bg-white/[0.02]"
+                                <div className="p-3 rounded-2xl bg-surface/50 backdrop-blur-xl border border-border-dim/50 flex items-center gap-3 shadow-sm">
+                                  <div className="p-2 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20 shrink-0">
+                                    <ShieldCheck size={16} />
+                                  </div>
+                                  <div className="flex flex-col min-w-0">
+                                    <span className="text-[9px] uppercase font-black text-text-dim tracking-wider">Admins</span>
+                                    <span className="text-sm font-black text-amber-500 font-mono">{totalAdmins}</span>
+                                  </div>
+                                </div>
+
+                                <div className="p-3 rounded-2xl bg-surface/50 backdrop-blur-xl border border-border-dim/50 flex items-center gap-3 shadow-sm">
+                                  <div className="p-2 rounded-xl bg-purple-500/10 text-purple-500 border border-purple-500/20 shrink-0">
+                                    <UserCheck size={16} />
+                                  </div>
+                                  <div className="flex flex-col min-w-0">
+                                    <span className="text-[9px] uppercase font-black text-text-dim tracking-wider">Team Leaders</span>
+                                    <span className="text-sm font-black text-purple-400 font-mono">{totalLeaders}</span>
+                                  </div>
+                                </div>
+
+                                <div className="p-3 rounded-2xl bg-surface/50 backdrop-blur-xl border border-border-dim/50 flex items-center gap-3 shadow-sm">
+                                  <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
+                                    <Activity size={16} className="animate-pulse" />
+                                  </div>
+                                  <div className="flex flex-col min-w-0">
+                                    <span className="text-[9px] uppercase font-black text-text-dim tracking-wider">Active Online</span>
+                                    <span className="text-sm font-black text-emerald-400 font-mono">{totalActiveNow}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Filter & Toolbar Header */}
+                              <div className="p-3 rounded-2xl bg-surface/60 backdrop-blur-xl border border-border-dim/50 flex flex-wrap items-center justify-between gap-3 shadow-md">
+                                <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+                                  {/* Search Bar */}
+                                  <div className="relative flex-1">
+                                    <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-dim" />
+                                    <input
+                                      type="text"
+                                      value={searchQuery}
+                                      onChange={(e) => {
+                                        setSearchQuery(e.target.value);
+                                        setUserPage(1);
+                                      }}
+                                      placeholder="Search name, email, or role..."
+                                      className="w-full pl-8 pr-7 py-1.5 rounded-xl bg-black/40 border border-white/10 text-xs text-text-primary placeholder:text-text-dim/50 focus:outline-none focus:border-amber-primary/50 transition-all"
+                                    />
+                                    {searchQuery && (
+                                      <button
+                                        onClick={() => setSearchQuery("")}
+                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-dim hover:text-white"
+                                      >
+                                        <X size={12} />
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {/* Custom Role Dropdown */}
+                                  <div className="relative">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setIsUserRoleDropdownOpen(!isUserRoleDropdownOpen);
+                                        setIsUserTeamDropdownOpen(false);
+                                        setIsUserPageSizeDropdownOpen(false);
+                                      }}
+                                      className={`px-3 py-1.5 rounded-xl bg-black/50 border text-xs text-text-primary flex items-center gap-2 transition-all cursor-pointer ${
+                                        userRoleFilter !== "all"
+                                          ? "border-amber-primary/50 text-amber-primary bg-amber-primary/5 shadow-[0_0_12px_rgba(245,158,11,0.1)]"
+                                          : "border-white/10 hover:border-white/20 hover:bg-black/70"
+                                      }`}
                                     >
-                                      <td className="px-4 py-2.5 border-b border-border-dim/10 group-last:border-none transition-colors">
-                                        <div className="flex items-center gap-3">
-                                          <div className="relative group/avatar">
-                                            <div className="w-8 h-8 rounded-lg bg-surface-2 border border-border-bright flex items-center justify-center text-xs font-bold text-amber-primary shadow-lg overflow-hidden group-hover/avatar:scale-105 transition-all duration-500 ring-1 ring-transparent group-hover/avatar:ring-amber-primary/30">
-                                              {u.profilePicture ? (
-                                                <img
-                                                  src={u.profilePicture}
-                                                  alt={u.name}
-                                                  className="w-full h-full object-cover grayscale-[0.2] group-hover/avatar:grayscale-0 transition-all duration-700"
-                                                />
-                                              ) : (
-                                                u.name?.[0] || "?"
+                                      <div className="flex items-center gap-1.5">
+                                        {userRoleFilter === "admin" && <ShieldCheck size={13} className="text-amber-500" />}
+                                        {userRoleFilter === "team_leader" && <UsersIcon size={13} className="text-purple-400" />}
+                                        {userRoleFilter === "employee" && <User size={13} className="text-blue-400" />}
+                                        {userRoleFilter === "all" && <Filter size={13} className="text-text-dim" />}
+                                        <span className="font-semibold">
+                                          {userRoleFilter === "all"
+                                            ? "All Roles"
+                                            : userRoleFilter === "admin"
+                                            ? "Admin"
+                                            : userRoleFilter === "team_leader"
+                                            ? "Team Leader"
+                                            : "Employee"}
+                                        </span>
+                                      </div>
+                                      <ChevronDown
+                                        size={12}
+                                        className={`text-text-dim transition-transform duration-200 ${
+                                          isUserRoleDropdownOpen ? "rotate-180 text-amber-primary" : ""
+                                        }`}
+                                      />
+                                    </button>
+
+                                    <AnimatePresence>
+                                      {isUserRoleDropdownOpen && (
+                                        <>
+                                          <div
+                                            className="fixed inset-0 z-30"
+                                            onClick={() => setIsUserRoleDropdownOpen(false)}
+                                          />
+                                          <motion.div
+                                            initial={{ opacity: 0, y: 6, scale: 0.96 }}
+                                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                                            exit={{ opacity: 0, y: 6, scale: 0.96 }}
+                                            transition={{ duration: 0.15 }}
+                                            className="absolute left-0 mt-1.5 w-48 rounded-2xl bg-surface/95 backdrop-blur-2xl border border-border-dim/60 shadow-2xl z-40 p-1.5 space-y-0.5 overflow-hidden"
+                                          >
+                                            <div className="px-2 py-1 text-[9px] font-black uppercase tracking-widest text-text-dim border-b border-border-dim/30 mb-1">
+                                              Filter By Role
+                                            </div>
+
+                                            {[
+                                              { id: "all", label: "All Roles", icon: Filter, color: "text-text-dim", count: users.length },
+                                              { id: "admin", label: "Admin", icon: ShieldCheck, color: "text-amber-500", count: users.filter(u => u.role === "admin").length },
+                                              { id: "team_leader", label: "Team Leader", icon: UsersIcon, color: "text-purple-400", count: users.filter(u => u.role === "team_leader").length },
+                                              { id: "employee", label: "Employee", icon: User, color: "text-blue-400", count: users.filter(u => u.role === "employee").length },
+                                            ].map((roleItem) => {
+                                              const Icon = roleItem.icon;
+                                              const isSelected = userRoleFilter === roleItem.id;
+                                              return (
+                                                <button
+                                                  key={roleItem.id}
+                                                  onClick={() => {
+                                                    setUserRoleFilter(roleItem.id);
+                                                    setUserPage(1);
+                                                    setIsUserRoleDropdownOpen(false);
+                                                  }}
+                                                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs transition-all cursor-pointer ${
+                                                    isSelected
+                                                      ? "bg-amber-primary/15 text-amber-primary font-bold border border-amber-primary/30"
+                                                      : "hover:bg-white/5 text-text-secondary hover:text-text-primary border border-transparent"
+                                                  }`}
+                                                >
+                                                  <div className="flex items-center gap-2">
+                                                    <Icon size={13} className={roleItem.color} />
+                                                    <span>{roleItem.label}</span>
+                                                  </div>
+                                                  <div className="flex items-center gap-1.5">
+                                                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-md bg-black/40 text-text-dim">
+                                                      {roleItem.count}
+                                                    </span>
+                                                    {isSelected && <Check size={12} className="text-amber-primary" />}
+                                                  </div>
+                                                </button>
+                                              );
+                                            })}
+                                          </motion.div>
+                                        </>
+                                      )}
+                                    </AnimatePresence>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  {/* Custom Team / Team Leader Filter Dropdown */}
+                                  <div className="relative">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setIsUserTeamDropdownOpen(!isUserTeamDropdownOpen);
+                                        setIsUserRoleDropdownOpen(false);
+                                        setIsUserPageSizeDropdownOpen(false);
+                                      }}
+                                      className={`px-3 py-1.5 rounded-xl bg-black/50 border text-xs text-text-primary flex items-center gap-2 transition-all cursor-pointer ${
+                                        teamFilter
+                                          ? "border-purple-500/50 text-purple-300 bg-purple-500/10 shadow-[0_0_12px_rgba(168,85,247,0.15)]"
+                                          : "border-white/10 hover:border-white/20 hover:bg-black/70"
+                                      }`}
+                                    >
+                                      <UsersIcon size={13} className={teamFilter ? "text-purple-400" : "text-text-dim"} />
+                                      <span className="font-semibold truncate max-w-[120px]">
+                                        {teamFilter
+                                          ? users.find((u) => u.id === teamFilter)?.name || "Team Filter"
+                                          : "All Teams"}
+                                      </span>
+                                      {teamFilter && (
+                                        <span
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setTeamFilter(null);
+                                            setUserPage(1);
+                                          }}
+                                          className="hover:text-white p-0.5 rounded-md hover:bg-white/10 transition-colors ml-0.5"
+                                          title="Clear team filter"
+                                        >
+                                          <X size={11} />
+                                        </span>
+                                      )}
+                                      <ChevronDown
+                                        size={12}
+                                        className={`text-text-dim transition-transform duration-200 ${
+                                          isUserTeamDropdownOpen ? "rotate-180 text-purple-400" : ""
+                                        }`}
+                                      />
+                                    </button>
+
+                                    <AnimatePresence>
+                                      {isUserTeamDropdownOpen && (
+                                        <>
+                                          <div
+                                            className="fixed inset-0 z-30"
+                                            onClick={() => setIsUserTeamDropdownOpen(false)}
+                                          />
+                                          <motion.div
+                                            initial={{ opacity: 0, y: 6, scale: 0.96 }}
+                                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                                            exit={{ opacity: 0, y: 6, scale: 0.96 }}
+                                            transition={{ duration: 0.15 }}
+                                            className="absolute left-0 mt-1.5 w-56 rounded-2xl bg-surface/95 backdrop-blur-2xl border border-border-dim/60 shadow-2xl z-40 p-1.5 space-y-0.5 overflow-hidden"
+                                          >
+                                            <div className="px-2 py-1 text-[9px] font-black uppercase tracking-widest text-text-dim border-b border-border-dim/30 mb-1 flex items-center justify-between">
+                                              <span>Filter By Team Leader</span>
+                                              {teamFilter && (
+                                                <button
+                                                  onClick={() => {
+                                                    setTeamFilter(null);
+                                                    setUserPage(1);
+                                                    setIsUserTeamDropdownOpen(false);
+                                                  }}
+                                                  className="text-purple-400 hover:underline cursor-pointer lowercase"
+                                                >
+                                                  reset
+                                                </button>
                                               )}
                                             </div>
-                                            <div
-                                              className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-surface shadow-lg transition-all duration-500 ${
-                                                u.lastActive &&
-                                                new Date().getTime() -
-                                                  new Date(
-                                                    u.lastActive,
-                                                  ).getTime() <
-                                                  300000
-                                                  ? "bg-emerald-500 animate-pulse scale-110"
-                                                  : "bg-text-dim/40"
-                                              }`}
-                                            />
-                                          </div>
-                                          <div className="flex flex-col min-w-0">
-                                            <span className="text-xs font-bold text-text-primary group-hover:text-amber-primary transition-colors leading-tight truncate">
-                                              {u.name}
-                                            </span>
-                                            <div className="flex items-center gap-2 mt-0.5">
-                                              <span className="text-[7px] text-text-dim font-mono tracking-tighter opacity-80 px-1 py-0.5 bg-surface-2 rounded-md border border-border-dim/30 transition-colors uppercase">
-                                                ID: {u.id.slice(0, 8)}
-                                              </span>
-                                            </div>
-                                          </div>
-                                        </div>
-                                      </td>
-                                      <td className="px-4 py-2.5 border-b border-border-dim/10 group-last:border-none transition-colors group-hover:bg-blue-500/[0.01]">
-                                        <div className="flex flex-col gap-1">
-                                          <div className="flex items-center gap-2 text-[11px] text-text-secondary font-medium group/mail">
-                                            <div className="p-1 rounded-lg bg-surface-2 border border-border-dim group-hover/mail:bg-blue-500/10 group-hover/mail:text-blue-400 transition-all">
-                                              <Mail size={8} />
-                                            </div>
-                                            <span className="truncate max-w-[150px] font-mono tracking-tight group-hover:text-text-primary transition-colors cursor-pointer">
-                                              {u.email}
-                                            </span>
-                                          </div>
-                                        </div>
-                                      </td>
-                                      <td className="px-4 py-2.5 border-b border-border-dim/10 group-last:border-none transition-colors group-hover:bg-purple-500/[0.01]">
-                                        <span
-                                          className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[8px] font-black uppercase tracking-[0.15em] border transition-all ${
-                                            u.role === "admin"
-                                              ? "border-amber-500/30 bg-amber-500/5 text-amber-500 shadow-sm shadow-amber-500/10"
-                                              : u.role === "team_leader"
-                                                ? "border-purple-500/30 bg-purple-500/5 text-purple-500 shadow-sm shadow-purple-500/10"
-                                                : "border-blue-500/30 bg-blue-500/5 text-blue-500 shadow-sm shadow-blue-500/10"
-                                          }`}
-                                        >
-                                          {u.role === "admin" && (
-                                            <ShieldCheck size={10} className="animate-pulse" />
-                                          )}
-                                          {u.role === "team_leader" && (
-                                            <UsersIcon size={10} />
-                                          )}
-                                          {u.role === "employee" && (
-                                            <User size={10} />
-                                          )}
-                                          {u.role === "admin"
-                                            ? "Admin"
-                                            : u.role?.replace(/_/g, " ")}
-                                        </span>
-                                      </td>
-                                      <td className="px-4 py-2.5 border-b border-border-dim/10 group-last:border-none text-right transition-colors group-hover:bg-red-500/[0.01]">
-                                        <div className="flex items-center justify-end gap-1 transition-all">
-                                          {hasPermission(
-                                            user,
-                                            "MANAGE_PERMISSIONS",
-                                          ) && (
+
                                             <button
                                               onClick={() => {
-                                                setUserForPermissions(u);
-                                                setSelectedPermissions(
-                                                  u.permissions || [],
-                                                );
-                                                setIsPermissionsModalOpen(true);
+                                                setTeamFilter(null);
+                                                setUserPage(1);
+                                                setIsUserTeamDropdownOpen(false);
                                               }}
-                                              className="w-7 h-7 flex items-center justify-center text-text-dim hover:text-amber-primary hover:bg-amber-primary/10 rounded-lg transition-all border border-transparent hover:border-amber-primary/20 active:scale-95 shadow-none"
-                                              title="Grant Permissions"
+                                              className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs transition-all cursor-pointer ${
+                                                !teamFilter
+                                                  ? "bg-purple-500/15 text-purple-300 font-bold border border-purple-500/30"
+                                                  : "hover:bg-white/5 text-text-secondary hover:text-text-primary border border-transparent"
+                                              }`}
                                             >
-                                              <ShieldCheck size={14} />
+                                              <div className="flex items-center gap-2">
+                                                <UsersIcon size={13} className="text-purple-400" />
+                                                <span>All Teams / Members</span>
+                                              </div>
+                                              {!teamFilter && <Check size={12} className="text-purple-400" />}
                                             </button>
-                                          )}
-                                          {hasPermission(user, "MANAGE_TEAM") &&
-                                            u.role === "employee" && (
+
+                                            <div className="my-1 border-t border-border-dim/20" />
+
+                                            {users
+                                              .filter((u) => u.role === "team_leader" || u.role === "admin")
+                                              .map((tl) => {
+                                                const memberCount = users.filter((u) => u.teamLeaderId === tl.id).length;
+                                                const isSelected = teamFilter === tl.id;
+                                                return (
+                                                  <button
+                                                    key={tl.id}
+                                                    onClick={() => {
+                                                      setTeamFilter(tl.id);
+                                                      setUserPage(1);
+                                                      setIsUserTeamDropdownOpen(false);
+                                                    }}
+                                                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs transition-all cursor-pointer ${
+                                                      isSelected
+                                                        ? "bg-purple-500/20 text-purple-300 font-bold border border-purple-500/40"
+                                                        : "hover:bg-white/5 text-text-secondary hover:text-text-primary border border-transparent"
+                                                    }`}
+                                                  >
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                      <div className="w-5 h-5 rounded-md bg-surface-2 border border-white/10 flex items-center justify-center text-[10px] font-bold text-purple-400 overflow-hidden shrink-0">
+                                                        {tl.profilePicture ? (
+                                                          <img src={tl.profilePicture} alt={tl.name} className="w-full h-full object-cover" />
+                                                        ) : (
+                                                          tl.name?.[0] || "T"
+                                                        )}
+                                                      </div>
+                                                      <span className="truncate">{tl.name}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5 shrink-0">
+                                                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-black/40 text-text-dim">
+                                                        {memberCount}
+                                                      </span>
+                                                      {isSelected && <Check size={12} className="text-purple-400" />}
+                                                    </div>
+                                                  </button>
+                                                );
+                                              })}
+                                          </motion.div>
+                                        </>
+                                      )}
+                                    </AnimatePresence>
+                                  </div>
+
+                                  {/* Custom Rows Per Page Dropdown */}
+                                  <div className="relative">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setIsUserPageSizeDropdownOpen(!isUserPageSizeDropdownOpen);
+                                        setIsUserRoleDropdownOpen(false);
+                                        setIsUserTeamDropdownOpen(false);
+                                      }}
+                                      className="px-2.5 py-1.5 rounded-xl bg-black/50 border border-white/10 hover:border-white/20 text-xs text-text-dim hover:text-text-primary flex items-center gap-1.5 transition-all cursor-pointer"
+                                    >
+                                      <span className="text-[10px] uppercase font-extrabold tracking-wider opacity-70">Show:</span>
+                                      <span className="font-bold font-mono text-amber-500">{userPageSize}</span>
+                                      <ChevronDown
+                                        size={11}
+                                        className={`text-text-dim transition-transform duration-200 ${
+                                          isUserPageSizeDropdownOpen ? "rotate-180 text-amber-500" : ""
+                                        }`}
+                                      />
+                                    </button>
+
+                                    <AnimatePresence>
+                                      {isUserPageSizeDropdownOpen && (
+                                        <>
+                                          <div
+                                            className="fixed inset-0 z-30"
+                                            onClick={() => setIsUserPageSizeDropdownOpen(false)}
+                                          />
+                                          <motion.div
+                                            initial={{ opacity: 0, y: 6, scale: 0.96 }}
+                                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                                            exit={{ opacity: 0, y: 6, scale: 0.96 }}
+                                            transition={{ duration: 0.15 }}
+                                            className="absolute right-0 mt-1.5 w-32 rounded-2xl bg-surface/95 backdrop-blur-2xl border border-border-dim/60 shadow-2xl z-40 p-1.5 space-y-0.5 overflow-hidden"
+                                          >
+                                            <div className="px-2 py-1 text-[9px] font-black uppercase tracking-widest text-text-dim border-b border-border-dim/30 mb-1">
+                                              Rows Per Page
+                                            </div>
+
+                                            {[5, 6, 10, 15, 25, 50].map((size) => {
+                                              const isSelected = userPageSize === size;
+                                              return (
+                                                <button
+                                                  key={size}
+                                                  onClick={() => {
+                                                    setUserPageSize(size);
+                                                    setUserPage(1);
+                                                    setIsUserPageSizeDropdownOpen(false);
+                                                  }}
+                                                  className={`w-full flex items-center justify-between px-2.5 py-1 rounded-xl text-xs font-mono transition-all cursor-pointer ${
+                                                    isSelected
+                                                      ? "bg-amber-primary/15 text-amber-primary font-bold border border-amber-primary/30"
+                                                      : "hover:bg-white/5 text-text-secondary hover:text-text-primary border border-transparent"
+                                                  }`}
+                                                >
+                                                  <span>{size} rows</span>
+                                                  {isSelected && <Check size={12} className="text-amber-primary" />}
+                                                </button>
+                                              );
+                                            })}
+                                          </motion.div>
+                                        </>
+                                      )}
+                                    </AnimatePresence>
+                                  </div>
+
+                                  {/* View Layout Mode Selector */}
+                                  <div className="flex items-center p-0.5 rounded-xl bg-black/40 border border-white/10 text-text-dim">
+                                    <button
+                                      onClick={() => {
+                                        setUserViewMode("table");
+                                        playSound("click");
+                                      }}
+                                      className={`p-1.5 rounded-lg transition-all flex items-center gap-1 ${
+                                        userViewMode === "table"
+                                          ? "bg-amber-primary text-black font-extrabold shadow"
+                                          : "hover:text-white"
+                                      }`}
+                                      title="Table View (Press 'T')"
+                                    >
+                                      <List size={13} />
+                                      <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-black/20 opacity-70">T</span>
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        setUserViewMode("grid");
+                                        playSound("click");
+                                      }}
+                                      className={`p-1.5 rounded-lg transition-all flex items-center gap-1 ${
+                                        userViewMode === "grid"
+                                          ? "bg-amber-primary text-black font-extrabold shadow"
+                                          : "hover:text-white"
+                                      }`}
+                                      title="Grid Cards View (Press 'G')"
+                                    >
+                                      <LayoutGrid size={13} />
+                                      <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-black/20 opacity-70">G</span>
+                                    </button>
+                                  </div>
+
+                                  {/* Build Team Button */}
+                                  {hasPermission(user, "MANAGE_TEAM") && (
+                                    <button
+                                      onClick={() => {
+                                        setSelectedUsersForTeam([]);
+                                        setIsBuildTeamModalOpen(true);
+                                      }}
+                                      className="px-3 py-1.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                                    >
+                                      <UserPlus size={13} />
+                                      <span className="hidden sm:inline">Build Team</span>
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Main Users Table / Cards Container */}
+                              <div className="bg-surface/50 backdrop-blur-xl border border-border-dim/50 rounded-2xl overflow-hidden shadow-2xl relative">
+                                <div className="absolute -top-32 -right-32 w-96 h-96 bg-amber-primary/5 rounded-full blur-[120px] pointer-events-none" />
+
+                                {filtered.length === 0 ? (
+                                  <div className="p-12 text-center flex flex-col items-center justify-center gap-3">
+                                    <div className="w-14 h-14 bg-surface-2 rounded-full flex items-center justify-center text-text-dim/40 border border-border-dim/50">
+                                      <Search size={24} />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <h4 className="text-xs font-extrabold text-text-primary uppercase tracking-widest">
+                                        No matching users
+                                      </h4>
+                                      <p className="text-[11px] text-text-dim max-w-xs mx-auto">
+                                        {searchQuery || userRoleFilter !== "all" || teamFilter
+                                          ? "Try adjusting your search query or clear active filters."
+                                          : "No user accounts registered in the database."}
+                                      </p>
+                                    </div>
+                                  </div>
+                                ) : userViewMode === "table" ? (
+                                  <div className="overflow-x-auto no-scrollbar">
+                                    <table className="w-full text-left border-separate border-spacing-0 min-w-[700px]">
+                                      <thead>
+                                        <tr className="bg-surface-2/60 backdrop-blur-md">
+                                          <th className="px-4 py-2.5 text-[9px] text-text-dim uppercase tracking-[0.25em] font-black border-b border-border-dim/50">
+                                            Member Identification
+                                          </th>
+                                          <th className="px-4 py-2.5 text-[9px] text-text-dim uppercase tracking-[0.25em] font-black border-b border-border-dim/50">
+                                            Email & Channels
+                                          </th>
+                                          <th className="px-4 py-2.5 text-[9px] text-text-dim uppercase tracking-[0.25em] font-black border-b border-border-dim/50">
+                                            Authority Role
+                                          </th>
+                                          <th className="px-4 py-2.5 text-[9px] text-text-dim uppercase tracking-[0.25em] font-black text-right border-b border-border-dim/50 pr-5">
+                                            Control
+                                          </th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-border-dim/10">
+                                        {paginatedUsers.map((u) => {
+                                          const isOnline =
+                                            u.lastActive &&
+                                            new Date().getTime() - new Date(u.lastActive).getTime() < 300000;
+
+                                          return (
+                                            <tr
+                                              key={u.id}
+                                              className="group transition-all duration-300 hover:bg-white/[0.03]"
+                                            >
+                                              <td className="px-4 py-2.5 border-b border-border-dim/10 group-last:border-none">
+                                                <div className="flex items-center gap-3">
+                                                  <div className="relative shrink-0">
+                                                    <div className="w-8 h-8 rounded-lg bg-surface-2 border border-border-bright flex items-center justify-center text-xs font-extrabold text-amber-primary shadow overflow-hidden">
+                                                      {u.profilePicture ? (
+                                                        <img
+                                                          src={u.profilePicture}
+                                                          alt={u.name}
+                                                          className="w-full h-full object-cover"
+                                                        />
+                                                      ) : (
+                                                        u.name?.[0] || "?"
+                                                      )}
+                                                    </div>
+                                                    <div
+                                                      className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-surface shadow ${
+                                                        isOnline ? "bg-emerald-500 animate-pulse" : "bg-text-dim/40"
+                                                      }`}
+                                                      title={isOnline ? "Online now" : "Offline"}
+                                                    />
+                                                  </div>
+                                                  <div className="flex flex-col min-w-0">
+                                                    <span className="text-xs font-bold text-text-primary group-hover:text-amber-primary transition-colors truncate">
+                                                      {u.name}
+                                                    </span>
+                                                    <span className="text-[9px] text-text-dim font-mono tracking-tight opacity-75">
+                                                      ID: {u.id.slice(0, 8)}
+                                                    </span>
+                                                  </div>
+                                                </div>
+                                              </td>
+
+                                              <td className="px-4 py-2.5 border-b border-border-dim/10 group-last:border-none">
+                                                <div className="flex items-center gap-1.5 text-xs text-text-secondary">
+                                                  <Mail size={11} className="text-text-dim shrink-0" />
+                                                  <span className="font-mono text-[11px] truncate max-w-[180px]">{u.email}</span>
+                                                </div>
+                                              </td>
+
+                                              <td className="px-4 py-2.5 border-b border-border-dim/10 group-last:border-none">
+                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                  <span
+                                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider border ${
+                                                      u.role === "admin"
+                                                        ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
+                                                        : u.role === "team_leader"
+                                                        ? "border-purple-500/30 bg-purple-500/10 text-purple-400"
+                                                        : "border-blue-500/30 bg-blue-500/10 text-blue-400"
+                                                    }`}
+                                                  >
+                                                    {u.role === "admin" && <ShieldCheck size={10} />}
+                                                    {u.role === "team_leader" && <UsersIcon size={10} />}
+                                                    {u.role === "employee" && <User size={10} />}
+                                                    <span>{u.role === "admin" ? "Admin" : u.role?.replace(/_/g, " ")}</span>
+                                                  </span>
+                                                  {u.status && u.status !== "Active" && (
+                                                    <span
+                                                      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider border shadow-sm ${
+                                                        u.status === "Pending Approval" || u.status === "Pending"
+                                                          ? "border-amber-500/60 bg-amber-500/20 text-amber-300 shadow-sm animate-breathe"
+                                                          : "border-red-500/30 bg-red-500/10 text-red-400"
+                                                      }`}
+                                                    >
+                                                      {(u.status === "Pending Approval" || u.status === "Pending") && (
+                                                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-breathe-dot" />
+                                                      )}
+                                                      {u.status}
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              </td>
+
+                                              <td className="px-4 py-2.5 border-b border-border-dim/10 group-last:border-none text-right pr-4">
+                                                <div className="flex items-center justify-end gap-1">
+                                                  {hasPermission(user, "MANAGE_PERMISSIONS") && (
+                                                    <button
+                                                      onClick={() => {
+                                                        setUserForPermissions(u);
+                                                        setSelectedPermissions(u.permissions || []);
+                                                        setIsPermissionsModalOpen(true);
+                                                      }}
+                                                      className="p-1.5 text-text-dim hover:text-amber-primary hover:bg-amber-primary/10 rounded-lg border border-transparent hover:border-amber-primary/20 transition-all cursor-pointer"
+                                                      title="Permissions"
+                                                    >
+                                                      <ShieldCheck size={13} />
+                                                    </button>
+                                                  )}
+
+                                                  {hasPermission(user, "MANAGE_TEAM") && u.role === "employee" && (
+                                                    <button
+                                                      onClick={() => {
+                                                        setUserForTeam(u);
+                                                        setSelectedTeamLeader(
+                                                          user?.role === "team_leader" ? user.id : u.teamLeaderId || ""
+                                                        );
+                                                        setIsTeamModalOpen(true);
+                                                      }}
+                                                      className="p-1.5 text-text-dim hover:text-purple-400 hover:bg-purple-500/10 rounded-lg border border-transparent hover:border-purple-500/20 transition-all cursor-pointer"
+                                                      title="Assign Team"
+                                                    >
+                                                      <UsersIcon size={13} />
+                                                    </button>
+                                                  )}
+
+                                                  {u.role === "team_leader" && (
+                                                    <>
+                                                      <button
+                                                        onClick={() => {
+                                                          setTeamFilter(u.id);
+                                                          setSearchQuery("");
+                                                          setUserPage(1);
+                                                        }}
+                                                        className="p-1.5 text-text-dim hover:text-purple-400 hover:bg-purple-500/10 rounded-lg border border-transparent hover:border-purple-500/20 transition-all cursor-pointer"
+                                                        title="View Team Members"
+                                                      >
+                                                        <UsersIcon size={13} />
+                                                      </button>
+                                                      {user?.role === "admin" && (
+                                                        <button
+                                                          onClick={() => {
+                                                            setSelectedTeamLeader(u.id);
+                                                            setSelectedUsersForTeam([]);
+                                                            setIsBuildTeamModalOpen(true);
+                                                          }}
+                                                          className="p-1.5 text-text-dim hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg border border-transparent hover:border-emerald-500/20 transition-all cursor-pointer"
+                                                          title="Expand Hierarchy"
+                                                        >
+                                                          <UserPlus size={13} />
+                                                        </button>
+                                                      )}
+                                                    </>
+                                                  )}
+
+                                                  <button
+                                                    onClick={() => {
+                                                      setSelectedProfileUser(u);
+                                                      setActiveTab("profile");
+                                                    }}
+                                                    className="p-1.5 text-text-dim hover:text-amber-primary hover:bg-amber-primary/10 rounded-lg border border-transparent hover:border-amber-primary/20 transition-all cursor-pointer"
+                                                    title="Inspect Profile"
+                                                  >
+                                                    <User size={13} />
+                                                  </button>
+
+                                                  {u.id !== user?.id && (user?.role === "admin" || user?.role === "team_leader") && (
+                                                    <button
+                                                      onClick={() => {
+                                                        setUserToDelete(u);
+                                                        setIsDeleteUserModalOpen(true);
+                                                      }}
+                                                      className="p-1.5 text-text-dim hover:text-red-400 hover:bg-red-500/10 rounded-lg border border-transparent hover:border-red-500/20 transition-all cursor-pointer"
+                                                      title="Delete Account"
+                                                    >
+                                                      <Trash2 size={13} />
+                                                    </button>
+                                                  )}
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                ) : (
+                                  /* Grid Cards Layout */
+                                  <div className="p-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                    {paginatedUsers.map((u) => {
+                                      const isOnline =
+                                        u.lastActive &&
+                                        new Date().getTime() - new Date(u.lastActive).getTime() < 300000;
+
+                                      return (
+                                        <div
+                                          key={u.id}
+                                          className="p-3.5 rounded-xl bg-black/40 border border-white/10 flex flex-col justify-between gap-3 hover:border-amber-primary/30 transition-all group"
+                                        >
+                                          <div className="flex items-start justify-between gap-2">
+                                            <div className="flex items-center gap-2.5 min-w-0">
+                                              <div className="relative shrink-0">
+                                                <div className="w-10 h-10 rounded-xl bg-surface-2 border border-border-bright flex items-center justify-center text-sm font-extrabold text-amber-primary shadow overflow-hidden">
+                                                  {u.profilePicture ? (
+                                                    <img
+                                                      src={u.profilePicture}
+                                                      alt={u.name}
+                                                      className="w-full h-full object-cover"
+                                                    />
+                                                  ) : (
+                                                    u.name?.[0] || "?"
+                                                  )}
+                                                </div>
+                                                <div
+                                                  className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-surface shadow ${
+                                                    isOnline ? "bg-emerald-500 animate-pulse" : "bg-text-dim/40"
+                                                  }`}
+                                                />
+                                              </div>
+                                              <div className="flex flex-col min-w-0">
+                                                <span className="text-xs font-black text-text-primary group-hover:text-amber-primary transition-colors truncate">
+                                                  {u.name}
+                                                </span>
+                                                <span className="text-[9px] text-text-dim font-mono tracking-tight">
+                                                  ID: {u.id.slice(0, 8)}
+                                                </span>
+                                              </div>
+                                            </div>
+
+                                            <span
+                                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider border shrink-0 ${
+                                                u.role === "admin"
+                                                  ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
+                                                  : u.role === "team_leader"
+                                                  ? "border-purple-500/30 bg-purple-500/10 text-purple-400"
+                                                  : "border-blue-500/30 bg-blue-500/10 text-blue-400"
+                                              }`}
+                                            >
+                                              {u.role === "admin" ? "Admin" : u.role?.replace(/_/g, " ")}
+                                            </span>
+                                          </div>
+
+                                          <div className="text-xs text-text-secondary flex items-center gap-1.5 font-mono truncate bg-surface-2/40 px-2.5 py-1.5 rounded-lg border border-border-dim/20">
+                                            <Mail size={10} className="text-text-dim shrink-0" />
+                                            <span className="truncate text-[10.5px]">{u.email}</span>
+                                          </div>
+
+                                          <div className="pt-2 border-t border-white/5 flex items-center justify-end gap-1">
+                                            {hasPermission(user, "MANAGE_PERMISSIONS") && (
+                                              <button
+                                                onClick={() => {
+                                                  setUserForPermissions(u);
+                                                  setSelectedPermissions(u.permissions || []);
+                                                  setIsPermissionsModalOpen(true);
+                                                }}
+                                                className="p-1.5 text-text-dim hover:text-amber-primary hover:bg-amber-primary/10 rounded-lg transition-colors cursor-pointer"
+                                                title="Permissions"
+                                              >
+                                                <ShieldCheck size={13} />
+                                              </button>
+                                            )}
+                                            {hasPermission(user, "MANAGE_TEAM") && u.role === "employee" && (
                                               <button
                                                 onClick={() => {
                                                   setUserForTeam(u);
                                                   setSelectedTeamLeader(
-                                                    user?.role === "team_leader"
-                                                      ? user.id
-                                                      : u.teamLeaderId || "",
+                                                    user?.role === "team_leader" ? user.id : u.teamLeaderId || ""
                                                   );
                                                   setIsTeamModalOpen(true);
                                                 }}
-                                                className="w-7 h-7 flex items-center justify-center text-text-dim hover:text-purple-500 hover:bg-purple-500/10 rounded-lg transition-all border border-transparent hover:border-purple-500/20 active:scale-95 shadow-none"
+                                                className="p-1.5 text-text-dim hover:text-purple-400 hover:bg-purple-500/10 rounded-lg transition-colors cursor-pointer"
                                                 title="Assign Team"
                                               >
-                                                <UsersIcon size={14} />
+                                                <UsersIcon size={13} />
                                               </button>
                                             )}
-                                          {u.role === "team_leader" && (
-                                            <>
-                                              <button
-                                                onClick={() => {
-                                                  setTeamFilter(u.id);
-                                                  setSearchQuery("");
-                                                }}
-                                                className="w-7 h-7 flex items-center justify-center text-text-dim hover:text-purple-500 hover:bg-purple-500/10 rounded-lg transition-all border border-transparent hover:border-purple-500/20 active:scale-95 shadow-none"
-                                                title="View Team"
-                                              >
-                                                <UsersIcon size={14} />
-                                              </button>
-                                              {user?.role === "admin" && (
-                                                <button
-                                                  onClick={() => {
-                                                    setSelectedTeamLeader(u.id);
-                                                    setSelectedUsersForTeam([]);
-                                                    setIsBuildTeamModalOpen(
-                                                      true,
-                                                    );
-                                                  }}
-                                                  className="w-7 h-7 flex items-center justify-center text-text-dim hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all border border-transparent hover:border-emerald-500/20 active:scale-95 shadow-none"
-                                                  title="Expand Hierarchy"
-                                                >
-                                                  <UserPlus size={14} />
-                                                </button>
-                                              )}
-                                            </>
-                                          )}
-                                          <button
-                                            onClick={() => {
-                                              setSelectedProfileUser(u);
-                                              setActiveTab("profile");
-                                            }}
-                                            className="w-7 h-7 flex items-center justify-center text-text-dim hover:text-amber-primary hover:bg-amber-primary/10 rounded-lg transition-all border border-transparent hover:border-amber-primary/20 active:scale-95 shadow-none"
-                                            title="Inspect Profile"
-                                          >
-                                            <User size={14} />
-                                          </button>
-                                          {u.id !== user?.id && (user?.role === "admin" || user?.role === "team_leader") && (
                                             <button
                                               onClick={() => {
-                                                setUserToDelete(u);
-                                                setIsDeleteUserModalOpen(true);
+                                                setSelectedProfileUser(u);
+                                                setActiveTab("profile");
                                               }}
-                                              className="w-7 h-7 flex items-center justify-center text-text-dim hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all border border-transparent hover:border-red-500/20 active:scale-95 shadow-none"
-                                              title="Delete User"
+                                              className="p-1.5 text-text-dim hover:text-amber-primary hover:bg-amber-primary/10 rounded-lg transition-colors cursor-pointer"
+                                              title="Inspect Profile"
                                             >
-                                              <Trash2 size={14} />
+                                              <User size={13} />
                                             </button>
-                                          )}
+                                            {u.id !== user?.id && (user?.role === "admin" || user?.role === "team_leader") && (
+                                              <button
+                                                onClick={() => {
+                                                  setUserToDelete(u);
+                                                  setIsDeleteUserModalOpen(true);
+                                                }}
+                                                className="p-1.5 text-text-dim hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
+                                                title="Delete Account"
+                                              >
+                                                <Trash2 size={13} />
+                                              </button>
+                                            )}
+                                          </div>
                                         </div>
-                                      </td>
-                                    </tr>
-                                  ));
-                                })()}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+
+                                {/* Bottom Pagination Bar */}
+                                {filtered.length > 0 && (
+                                  <div className="px-4 py-3 bg-surface-2/40 border-t border-border-dim/50 flex flex-wrap items-center justify-between gap-3 text-xs">
+                                    <span className="text-[11px] text-text-dim font-medium">
+                                      Showing <span className="font-bold text-text-primary">{startIndex + 1}</span> to{" "}
+                                      <span className="font-bold text-text-primary">
+                                        {Math.min(startIndex + userPageSize, filtered.length)}
+                                      </span>{" "}
+                                      of <span className="font-bold text-amber-500">{filtered.length}</span> members
+                                    </span>
+
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        disabled={safePage <= 1}
+                                        onClick={() => setUserPage((prev) => Math.max(1, prev - 1))}
+                                        className="px-2.5 py-1 rounded-lg bg-black/40 border border-white/10 text-text-dim hover:text-white disabled:opacity-30 disabled:pointer-events-none text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                                      >
+                                        <ChevronLeft size={12} />
+                                        <span>Prev</span>
+                                      </button>
+
+                                      <div className="flex items-center gap-1 px-1">
+                                        {Array.from({ length: totalPages }, (_, i) => i + 1).map((pg) => (
+                                          <button
+                                            key={pg}
+                                            onClick={() => setUserPage(pg)}
+                                            className={`w-6 h-6 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                              pg === safePage
+                                                ? "bg-amber-primary text-black font-extrabold shadow"
+                                                : "bg-black/30 hover:bg-white/10 text-text-dim hover:text-white"
+                                            }`}
+                                          >
+                                            {pg}
+                                          </button>
+                                        ))}
+                                      </div>
+
+                                      <button
+                                        disabled={safePage >= totalPages}
+                                        onClick={() => setUserPage((prev) => Math.min(totalPages, prev + 1))}
+                                        className="px-2.5 py-1 rounded-lg bg-black/40 border border-white/10 text-text-dim hover:text-white disabled:opacity-30 disabled:pointer-events-none text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                                      >
+                                        <span>Next</span>
+                                        <ChevronRight size={12} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </>
+                          );
+                        })()}
                       </motion.div>
                     )}
 
@@ -14012,6 +16937,7 @@ export default function App() {
                         showToast={showToast}
                         autoSave={autoSave}
                         onResetCredentials={handleResetCredentials}
+                        logs={logs}
                         onBack={() => {
                           setSelectedProfileUser(null);
                           setActiveTab("users");
@@ -14305,10 +17231,12 @@ export default function App() {
                               bhk: p.bhk,
                               floorNumber: p.floorNumber,
                               location: p.location,
+                              propertyHolderName: p.propertyHolderName,
                             }))}
                           existingBuilders={allBuilders}
                           existingSocieties={allSocieties}
                           showToast={showToast}
+                          assignedRegion={assignedRegion}
                         />
                       ) : (
                         <ProjectForm
@@ -14375,6 +17303,8 @@ export default function App() {
                   hasPermission(user, "DELETE_PROJECTS") && user?.role === "admin"
                 }
                 hasCreatePermission={hasPermission(user, "ADD_PROJECTS")}
+                isAlertActive={!!priceAlerts[selectedProject.id]}
+                onToggleAlert={handleTogglePriceAlert}
               />
             )}
           </AnimatePresence>
@@ -14404,13 +17334,28 @@ export default function App() {
                 onViewBuilder={(name) => {
                   setSelectedBuilder(name);
                 }}
+                onEdit={(p: any) => {
+                  setEditingResale(p);
+                  setEntryType("resale");
+                  setIsModalOpen(true);
+                }}
+                onDelete={(p: any) => {
+                  setResaleToDelete(p);
+                  setSelectedResale(null);
+                }}
+                hasEditPermission={
+                  hasPermission(user, "EDIT_RESALE") && user?.role === "admin"
+                }
+                hasDeletePermission={
+                  hasPermission(user, "DELETE_RESALE") && user?.role === "admin"
+                }
               />
             )}
           </AnimatePresence>
           {/* User Modal */}
           <AnimatePresence>
             {isUserModalOpen && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -14419,47 +17364,61 @@ export default function App() {
                     setIsUserModalOpen(false);
                     setCreatedUserCredentials(null);
                   }}
-                  className="absolute inset-0 bg-black/70 "
+                  className="absolute inset-0 bg-black/80 backdrop-blur-sm"
                 />
                 <motion.div
-                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  initial={{ opacity: 0, scale: 0.95, y: 15 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                  className="relative w-full max-w-md max-h-[90vh] bg-surface border border-border-bright rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+                  exit={{ opacity: 0, scale: 0.95, y: 15 }}
+                  className="relative w-full max-w-lg max-h-[92vh] bg-surface border border-border-dim rounded-3xl shadow-2xl overflow-hidden flex flex-col z-10"
                 >
-                  <div className="p-6 border-b border-border-dim flex justify-between items-center shrink-0">
-                    <h2 className="font-serif text-lg font-bold text-text-primary">
-                      {createdUserCredentials
-                        ? "User Created Successfully"
-                        : "Add New User"}
-                    </h2>
+                  <div className="px-6 py-4 border-b border-border-dim/60 flex justify-between items-center shrink-0 bg-surface-2/60 backdrop-blur-md">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-2 rounded-xl bg-amber-primary/10 border border-amber-primary/20 text-amber-primary">
+                        {createdUserCredentials ? <ShieldCheck size={18} /> : <UserPlus size={18} />}
+                      </div>
+                      <div>
+                        <h2 className="text-base font-bold text-text-primary">
+                          {createdUserCredentials
+                            ? "Account Provisioned"
+                            : "Provision Team Member"}
+                        </h2>
+                        <p className="text-[11px] text-text-dim">
+                          {createdUserCredentials
+                            ? "System access credentials generated successfully"
+                            : "Configure account permissions & issue authentication token"}
+                        </p>
+                      </div>
+                    </div>
                     <button
                       onClick={() => {
                         setIsUserModalOpen(false);
                         setCreatedUserCredentials(null);
                       }}
-                      className="text-text-dim hover:text-red-500 transition-colors"
+                      className="p-1.5 rounded-xl hover:bg-surface-3 text-text-dim hover:text-text-primary transition-colors border border-border-dim/50"
                     >
-                      ✕
+                      <X size={18} />
                     </button>
                   </div>
 
-                  {createdUserCredentials ? (
-                    <CredentialGenerationCard
-                      credentials={createdUserCredentials}
-                      onDone={() => {
-                        setIsUserModalOpen(false);
-                        setCreatedUserCredentials(null);
-                      }}
-                      onCopySuccess={(msg) => showToast(msg, "info")}
-                    />
-                  ) : (
-                    <CredentialForm
-                      onSubmit={handleAddUser}
-                      isLoading={isSubmitting} // Need to make sure isSubmitting is defined or use another state
-                      error={userError}
-                    />
-                  )}
+                  <div className="overflow-y-auto no-scrollbar">
+                    {createdUserCredentials ? (
+                      <CredentialGenerationCard
+                        credentials={createdUserCredentials}
+                        onDone={() => {
+                          setIsUserModalOpen(false);
+                          setCreatedUserCredentials(null);
+                        }}
+                        onCopySuccess={(msg) => showToast(msg, "info")}
+                      />
+                    ) : (
+                      <CredentialForm
+                        onSubmit={handleAddUser}
+                        isLoading={isSubmitting}
+                        error={userError}
+                      />
+                    )}
+                  </div>
                 </motion.div>
               </div>
             )}
@@ -14907,6 +17866,66 @@ export default function App() {
             )}
           </AnimatePresence>
 
+          {/* Delete Resale Confirmation Modal */}
+          <AnimatePresence>
+            {resaleToDelete && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setResaleToDelete(null)}
+                  className="absolute inset-0 bg-black/70 "
+                />
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                  className="relative w-full max-w-md bg-surface border border-border-dim rounded-2xl shadow-2xl overflow-hidden"
+                >
+                  <div className="p-8 text-center">
+                    <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+                      <AlertCircle size={32} className="text-red-500" />
+                    </div>
+                    <h2 className="font-serif text-xl font-bold text-text-primary mb-2">
+                      Delete Resale Property?
+                    </h2>
+                    <p className="text-sm text-text-secondary leading-relaxed mb-8">
+                      Are you sure you want to delete the resale listing for{" "}
+                      <span className="font-bold text-text-primary">
+                        {resaleToDelete.societyName}
+                      </span>
+                      ? This action cannot be undone.
+                    </p>
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <button
+                        onClick={() => setResaleToDelete(null)}
+                        className="w-full sm:flex-1 px-6 py-3 rounded-xl text-xs font-bold text-text-secondary bg-surface-2 hover:text-text-primary transition-all"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => {
+                          handleDeleteResale(resaleToDelete.id);
+                          setResaleToDelete(null);
+                        }}
+                        className={`w-full sm:flex-1 px-6 py-3 rounded-xl text-xs font-bold text-bg transition-all shadow-lg ${
+                          hasPermission(user, "DELETE_RESALE")
+                            ? "bg-red-500 hover:bg-red-600 shadow-red-500/20"
+                            : "bg-amber-primary hover:bg-amber-secondary shadow-amber-primary/20"
+                        }`}
+                      >
+                        {hasPermission(user, "DELETE_RESALE")
+                          ? "Confirm Delete"
+                          : "Confirm Request"}
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
           {/* Bulk Delete Confirmation Modal */}
           <AnimatePresence>
             {isBulkDeleteModalOpen && (
@@ -15140,6 +18159,10 @@ export default function App() {
               setActiveTab("profile");
             }}
             playSound={playSound}
+            request={request}
+            showToast={showToast}
+            assignedRegion={assignedRegion}
+            setAssignedRegion={setAssignedRegion}
           />
 
           {/* Duplicate Entry Warning Alert Modal */}
@@ -15214,7 +18237,7 @@ export default function App() {
                   height: "350vmax",
                   marginLeft: "-175vmax",
                   marginTop: "-175vmax",
-                  backgroundColor: themeRipple.toTheme === "light" ? "#f8fafc" : "#0e1015",
+                  backgroundColor: themeRipple.toTheme === "light" ? "#FFFDD0" : "#0e1015",
                   zIndex: 99999,
                   willChange: "transform",
                   transformOrigin: "center center",

@@ -9,14 +9,22 @@ import jwt from "jsonwebtoken";
 import { ProjectController } from "./src/server/controllers/ProjectController";
 import { ResalePropertyController } from "./src/server/controllers/ResalePropertyController";
 import { ReportController } from "./src/server/controllers/ReportController";
-import { sendNewProjectNotification, sendApprovalRequestNotification, sendStatusUpdateNotification, sendPasswordResetEmail } from "./src/server/services/emailService";
+import { sendNewProjectNotification, sendApprovalRequestNotification, sendStatusUpdateNotification, sendPasswordResetEmail, sendPasswordResetOtpEmail, sendUserWelcomeInvitationEmail, sanitizeSmtpCredentials } from "./src/server/services/emailService";
 import { getDb, saveDb } from "./src/lib/db";
+import { uploadFileToCdn } from "./src/server/services/minioService";
 import compression from "compression";
 import helmet from "helmet";
 import { rateLimit } from "express-rate-limit";
 import { setupSwagger } from "./src/server/swagger";
+import nodemailer from "nodemailer";
 
-dotenv.config();
+if (fs.existsSync(path.join(process.cwd(), ".env"))) {
+  dotenv.config({ override: true });
+} else if (fs.existsSync(path.join(process.cwd(), ".env.example"))) {
+  dotenv.config({ path: path.join(process.cwd(), ".env.example"), override: true });
+} else {
+  dotenv.config({ override: true });
+}
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-for-development';
 
@@ -87,6 +95,12 @@ async function startServer() {
 
   app.use(express.json({ limit: '500mb' }));
   app.use(express.urlencoded({ limit: '500mb', extended: true }));
+
+  const persistentUploadsDir = path.join(process.cwd(), 'uploads');
+  if (!fs.existsSync(persistentUploadsDir)) {
+    fs.mkdirSync(persistentUploadsDir, { recursive: true });
+  }
+  app.use('/uploads', express.static(persistentUploadsDir));
   app.use('/uploads', express.static(path.join(process.cwd(), 'dist', 'uploads')));
 
   // --- Middleware ---
@@ -226,6 +240,7 @@ async function startServer() {
           email: adminEmail, 
           username: 'super.admin.init',
           role: 'admin', 
+          status: 'Active',
           passwordHash: await bcrypt.hash('password123', 10),
           mustResetPassword: false,
           permissions: ROLE_PERMISSIONS.admin,
@@ -239,6 +254,7 @@ async function startServer() {
           email: 'employee@pysync.local', 
           username: 'employee.user.init',
           role: 'employee', 
+          status: 'Active',
           passwordHash: await bcrypt.hash('password123', 10),
           mustResetPassword: false,
           permissions: ROLE_PERMISSIONS.employee,
@@ -252,6 +268,7 @@ async function startServer() {
           email: 'leader@pysync.local', 
           username: 'team.leader.init',
           role: 'team_leader', 
+          status: 'Active',
           passwordHash: await bcrypt.hash('password123', 10),
           mustResetPassword: false,
           permissions: ROLE_PERMISSIONS.team_leader,
@@ -422,54 +439,9 @@ async function startServer() {
     console.log("Resale properties seeded.");
   };
 
-  const backfillCredentialsLogs = async () => {
-    const db = getDb();
-    if (!db || !db.users) return;
-    
-    const logs = db.logs || [];
-    let updated = false;
-
-    for (const u of db.users) {
-      const matchText = `Credentials check for ${u.username}`;
-      const hasLog = logs.some((l: any) => l.summary && l.summary.includes(matchText));
-      if (!hasLog) {
-        let p = 'password123';
-        if (u.username === 'super.admin.init' || u.username === 'employee.user.init' || u.username === 'team.leader.init') {
-          p = 'password123';
-        } else {
-          try {
-            if (bcrypt.compareSync('password123', u.passwordHash)) {
-              p = 'password123';
-            } else {
-              p = '[Custom Set Key / Hash: ' + u.passwordHash.substring(0, 15) + '...]';
-            }
-          } catch (e) {
-            p = '[See Reset Link/Key]';
-          }
-        }
-        
-        logs.push({
-          id: Math.random().toString(36).substr(2, 9),
-          action: 'CREDENTIAL_LOG',
-          user: 'System',
-          summary: `Current Active Credential info - User: ${u.name} (${u.email}) | ${matchText} | Password: ${p} | Role: ${u.role}`,
-          timestamp: new Date().toISOString()
-        });
-        updated = true;
-      }
-    }
-    
-    if (updated) {
-      db.logs = logs;
-      saveDb(db);
-      console.log("Credentials backfilled into audit logs.");
-    }
-  };
-
   await seedUsers();
   await seedProjects();
   await seedResaleProperties();
-  await backfillCredentialsLogs();
 
   // --- Utilities ---
   const generateUsername = async (name: string) => {
@@ -636,54 +608,10 @@ async function startServer() {
    *       400:
    *         description: Invalid input or user already exists
    */
-  app.post("/api/auth/signup", async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { name, email, password, role = 'employee' } = req.body;
-      if (!name || !email || !password) return res.status(400).json({ error: "Missing fields" });
-      
-      const passwordError = validatePassword(password);
-      if (passwordError) return res.status(400).json({ error: passwordError });
-      
-      const validRoles = ['admin', 'employee', 'team_leader'];
-      if (!validRoles.includes(role)) {
-        return res.status(400).json({ error: `Invalid role: '${role}'. Allowed roles are: ${validRoles.join(', ')}` });
-      }
-
-      const db = getDb();
-      const existingUser = db?.users.find((u: any) => u.email === email);
-      if (existingUser) return res.status(400).json({ error: "An account with this email already exists" });
-
-      const username = await generateUsername(name);
-
-      const newUser = {
-        id: Math.random().toString(36).substr(2, 9),
-        name,
-        email,
-        username,
-        role,
-        permissions: ROLE_PERMISSIONS[role] || ['VIEW_PROJECTS', 'VIEW_RESALE'],
-        passwordHash: await bcrypt.hash(password, 10),
-        mustResetPassword: false,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        lastActive: new Date().toISOString()
-      };
-      
-      db.users.push(newUser);
-      saveDb(db);
-      
-      await createLog('SIGNUP', name, `User signed up: ${email}`, newUser.id);
-
-      const token = jwt.sign(
-        { id: newUser.id, username: newUser.username, role: newUser.role },
-        JWT_SECRET,
-        { expiresIn: '24h' }
-      );
-
-      res.status(201).json({ id: newUser.id, name, email, role, token });
-    } catch (err: any) {
-      next(err);
-    }
+  app.post("/api/auth/signup", async (req: Request, res: Response) => {
+    return res.status(403).json({ 
+      error: "Public registration is disabled. Accounts can only be created by an administrator." 
+    });
   });
 
   // Login Attempts Tracking
@@ -746,6 +674,19 @@ async function startServer() {
       }
 
       loginAttempts.delete(email);
+
+      // Check account approval status
+      if (user.status === 'Pending Approval' || user.status === 'Pending') {
+        return res.status(403).json({ 
+          error: "Your account registration is currently pending administrator approval. Please wait for an admin to approve and activate your account." 
+        });
+      }
+
+      if (user.status === 'Rejected') {
+        return res.status(403).json({ 
+          error: "Your account registration request was declined by the administrator." 
+        });
+      }
 
       // Session concurrency check: prevents multiple active sessions for restricted roles
       if (user.role === 'admin' || user.role === 'employee') {
@@ -838,35 +779,39 @@ async function startServer() {
             isError: true
           });
         }
-        return res.json({ message: "If an account exists with that email, a reset link has been sent." });
+        return res.json({ message: "If an account exists with that email, a password reset link has been sent." });
       }
       
-      const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      // Generate a secure, unique reset token
+      const token = crypto.randomBytes(32).toString('hex');
+      
       passwordResetTokens.set(token, {
         email,
         expires: Date.now() + 3600000 // 1 hour
       });
       
-      const resetLink = req.protocol + "://" + req.get('host') + "?token=" + token;
-      await createLog('PASSWORD_RESET_REQUEST', user.name, "Password reset requested for: " + email + ". Token: " + token, user.id);
+      const origin = req.headers.origin || `${req.protocol}://${req.get('host')}`;
+      const resetLink = `${origin}/?token=${token}`;
+      
+      await createLog('PASSWORD_RESET_REQUEST', user.name, "Password reset link requested for: " + email, user.id);
       
       // Send actual email (or mock)
       await sendPasswordResetEmail(email, resetLink);
       
       console.log("\n--- SIMULATED EMAIL ---");
       console.log("To: " + email);
-      console.log("Subject: Password Reset Request");
+      console.log("Subject: Password Reset Request - pySync");
       console.log("Link: " + resetLink);
       console.log("-----------------------\n");
 
       if (isMockMode) {
         return res.json({ 
-          message: "A password reset link has been generated to reset your password.",
+          message: "A password reset link has been sent to your email.",
           debugResetLink: resetLink 
         });
       }
 
-      res.json({ message: "If an account exists with that email, a reset link has been sent." });
+      res.json({ message: "If an account exists with that email, a password reset link has been sent." });
     } catch (err: any) {
       next(err);
     }
@@ -879,7 +824,7 @@ async function startServer() {
       const resetInfo = passwordResetTokens.get(token);
 
       if (!resetInfo || resetInfo.expires < Date.now()) {
-        return res.status(400).json({ error: "Invalid or expired reset token" });
+        return res.status(400).json({ error: "Invalid or expired password reset link" });
       }
 
       const db = getDb();
@@ -946,7 +891,6 @@ async function startServer() {
             project.possessionStatus = 'Under Construction';
             project.updatedAt = now.toISOString();
             updatedCount++;
-            await createLog('AUTO_UPDATE', 'System', `Project "${project.title}" status automatically changed from New Launch to Under Construction.`);
             await createNotification(null, 'Project Status Updated', `Project "${project.title}" is now Under Construction.`, 'info');
           }
         }
@@ -1159,7 +1103,6 @@ async function startServer() {
    *         description: System logs retrieved successfully
    */
   app.get("/api/logs", checkPermission('VIEW_REPORTS'), async (req: Request, res: Response) => {
-    await backfillCredentialsLogs();
     const db = getDb();
     const userId = req.headers['x-user-id'] as string;
     const userRole = req.headers['x-user-role'] as string;
@@ -1172,9 +1115,82 @@ async function startServer() {
     res.json(logs.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 5000));
   });
 
+  app.delete("/api/logs", checkPermission('VIEW_REPORTS'), async (req: Request, res: Response) => {
+    const db = getDb();
+    if (!db) return res.status(500).json({ error: "Database unavailable" });
+    db.logs = [];
+    saveDb(db);
+    broadcastEvent({ type: 'LOGS_CLEARED' });
+    res.json({ success: true, message: "All audit logs cleared from database." });
+  });
+
   app.get("/api/projects", checkPermission('VIEW_PROJECTS'), projectController.getAll);
   app.post("/api/projects", checkPermission('ADD_PROJECTS'), projectController.create);
   app.put("/api/projects/:id", checkPermission('EDIT_PROJECTS'), projectController.update);
+  
+  app.patch("/api/projects/:id", async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { role, userName } = req.query as { role?: string; userName?: string };
+      const db = getDb();
+      
+      const projIndex = db.projects.findIndex((p: any) => p.id === id);
+      if (projIndex === -1) return res.status(404).json({ error: "Project not found" });
+      const oldProj = db.projects[projIndex];
+      
+      const activeUser = (userName || req.headers['x-user-name'] || 'User') as string;
+      const userId = req.headers['x-user-id'] as string;
+      const userRole = (role || req.headers['x-user-role'] || '') as string;
+      
+      // Allow patching if user has EDIT_PROJECTS, ADD_PROJECTS, or is the creator of the project
+      const permissions = ROLE_PERMISSIONS[userRole] || [];
+      const hasPermission = permissions.includes('EDIT_PROJECTS') || permissions.includes('ADD_PROJECTS') || oldProj.createdByUserId === userId || userRole === 'admin';
+      
+      if (!hasPermission) {
+        return res.status(403).json({ error: "Forbidden: Insufficient permissions to modify project" });
+      }
+
+      const updateData = { ...req.body };
+      
+      if (updateData.images && Array.isArray(updateData.images)) {
+        updateData.images = await Promise.all(
+          updateData.images.map(async (img: any, idx: number) => {
+            if (img && img.data && img.data.startsWith('data:')) {
+              const uploadedUrl = await uploadFileToCdn(img.data, img.name || `image_${idx}`);
+              return { ...img, data: uploadedUrl };
+            }
+            return img;
+          })
+        );
+      }
+      
+      if (updateData.pdfs && Array.isArray(updateData.pdfs)) {
+        updateData.pdfs = await Promise.all(
+          updateData.pdfs.map(async (pdf: any, idx: number) => {
+            if (pdf && pdf.data && pdf.data.startsWith('data:')) {
+              const uploadedUrl = await uploadFileToCdn(pdf.data, pdf.name || `pdf_${idx}`);
+              return { ...pdf, data: uploadedUrl };
+            }
+            return pdf;
+          })
+        );
+      }
+
+      const updatedProj = {
+        ...oldProj,
+        ...updateData,
+        id // prevent id overwrite
+      };
+
+      db.projects[projIndex] = updatedProj;
+      saveDb(db);
+
+      await createLog('UPDATE', activeUser, `Uploaded/patched media for project: ${updatedProj.title}`, userId);
+      res.json(updatedProj);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
   app.delete("/api/projects/:id", async (req: Request, res: Response) => {
     const { id } = req.params;
     const { role, userName } = req.query as { role?: string, userName?: string };
@@ -1378,23 +1394,40 @@ async function startServer() {
 
     // Permissions check
     const isProjectApproval = approval.type === 'New Project Approval';
-    const canApprove = userRole === 'admin' || (userRole === 'team_leader' && isProjectApproval);
-    
-    let hasDeletionsPermission = false;
+    const isUserApproval = approval.type === 'User Registration Approval' || approval.type === 'New User Registration' || approval.type === 'User Registration';
+
+    let canApprove = false;
     if (userRole === 'admin') {
-      hasDeletionsPermission = true;
-    } else {
+      canApprove = true;
+    } else if (userRole === 'team_leader' && isProjectApproval) {
+      canApprove = true;
+    } else if (!isUserApproval) {
       const u = db.users.find((u: any) => u.id === userId);
       const permissions = u?.permissions || ROLE_PERMISSIONS[userRole] || [];
-      hasDeletionsPermission = permissions.includes('APPROVE_DELETIONS');
+      if (permissions.includes('APPROVE_DELETIONS')) {
+        canApprove = true;
+      }
     }
 
-    if (!canApprove && !hasDeletionsPermission) {
+    if (!canApprove) {
       return res.status(403).json({ error: "Forbidden: You do not have permission to perform this action." });
     }
 
     if (action === 'approve') {
-      if (approval.type === 'Edit Request') {
+      if (approval.type === 'User Registration Approval' || approval.type === 'New User Registration' || approval.type === 'User Registration') {
+        const userToApprove = db.users.find((u: any) => u.id === approval.userId || u.email === approval.userEmail);
+        if (userToApprove) {
+          userToApprove.status = 'Active';
+          userToApprove.updatedAt = new Date().toISOString();
+        }
+        await createLog('APPROVE_USER', userName || 'Admin', `Approved user registration: ${approval.userName || approval.userEmail} [${approval.userRole || 'employee'}]`, userId);
+        await createNotification(approval.requestedBy, 'Account Approved', `Your pySync account registration has been approved. You can now log in.`, 'success', approval.userId);
+        
+        const requesterEmail = approval.userEmail || getUserEmail(approval.requestedBy);
+        if (requesterEmail) {
+          await sendStatusUpdateNotification('Account Registration', approval.userName || 'Account', 'Approved & Activated', requesterEmail);
+        }
+      } else if (approval.type === 'Edit Request') {
         await createLog('APPROVE_EDIT', userName || 'Admin', `Approved edit request for: ${approval.projectTitle}`, userId);
         await createNotification(approval.requestedBy, 'Edit Request Approved', `Your edit suggestion for ${approval.projectTitle} was approved and marked as resolved.`, 'success');
         
@@ -1423,7 +1456,20 @@ async function startServer() {
         }
       }
     } else {
-      if (approval.type === 'Edit Request') {
+      if (approval.type === 'User Registration Approval' || approval.type === 'New User Registration' || approval.type === 'User Registration') {
+        const userToReject = db.users.find((u: any) => u.id === approval.userId || u.email === approval.userEmail);
+        if (userToReject) {
+          userToReject.status = 'Rejected';
+          userToReject.updatedAt = new Date().toISOString();
+        }
+        await createLog('REJECT_USER', userName || 'Admin', `Rejected user registration: ${approval.userName || approval.userEmail}`, userId);
+        await createNotification(approval.requestedBy, 'Account Registration Rejected', `Your pySync account registration request was not approved.`, 'warning', approval.userId);
+        
+        const requesterEmail = approval.userEmail || getUserEmail(approval.requestedBy);
+        if (requesterEmail) {
+          await sendStatusUpdateNotification('Account Registration', approval.userName || 'Account', 'Rejected', requesterEmail);
+        }
+      } else if (approval.type === 'Edit Request') {
         await createLog('REJECT_EDIT', userName || 'Admin', `Rejected edit request for: ${approval.projectTitle}`, userId);
         await createNotification(approval.requestedBy, 'Edit Request Rejected', `Your edit suggestion for ${approval.projectTitle} was rejected.`, 'warning');
         
@@ -1455,6 +1501,8 @@ async function startServer() {
     }
     approval.status = action === 'approve' ? 'Approved' : 'Rejected';
     saveDb(db);
+    broadcastEvent({ type: 'APPROVAL_UPDATED', approval });
+    broadcastEvent({ type: 'USER_UPDATED', userId: approval.userId });
     res.json({ success: true });
   });
 
@@ -1487,6 +1535,10 @@ async function startServer() {
     let users = db.users;
     if (userRole === 'team_leader') {
       users = db.users.filter((u: any) => u.teamLeaderId === userId || u.id === userId || (u.role === 'employee' && !u.teamLeaderId));
+    }
+    const callerName = (req.headers['x-user-name'] || user?.name || 'User') as string;
+    if (userId) {
+      await createLog('READ_USERS', callerName, 'Viewed user directory', userId);
     }
     res.json(users.map(({ passwordHash: _, ...u }: any) => u));
   });
@@ -1569,7 +1621,21 @@ async function startServer() {
       const currentAdmin = (adminName || req.headers['x-user-name'] || 'Admin') as string;
       const userId = req.headers['x-user-id'] as string;
       await createLog('USER_CREATED', currentAdmin, `Created user: ${name} (${email}) | Username: ${username} | Password: ${password}`, userId);
-      res.status(201).json({ ...newUser, password });
+
+      // Generate application login link with user prefilled
+      const host = req.get('host') || 'localhost:3000';
+      const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+      const origin = req.headers.origin || `${protocol}://${host}`;
+      const loginLink = `${origin}/?welcome=true&user=${encodeURIComponent(username)}`;
+
+      // Send welcome email containing generated credentials & login redirect link
+      try {
+        await sendUserWelcomeInvitationEmail(email, name, username, password, loginLink);
+      } catch (mailErr) {
+        console.error("Error sending user creation invitation email:", mailErr);
+      }
+
+      res.status(201).json({ ...newUser, password, loginLink, email, name });
     } catch (err: any) { next(err); }
   });
 
@@ -1668,6 +1734,448 @@ async function startServer() {
     await createLog('SECURITY_UPDATE', caller, 'Regenerated global developer public API Key', userId);
 
     res.json({ success: true, key: db.config.publicApiKey });
+  });
+
+  // SMTP Config Management API
+  app.get("/api/smtp/config", checkPermission('MANAGE_USERS'), async (req: Request, res: Response) => {
+    const db = getDb();
+    if (!db) return res.status(500).json({ error: "Database not found" });
+    
+    // Return SMTP config, but obscure the password for security
+    const config = db.smtp_config || {
+      host: process.env.SMTP_HOST || "",
+      port: process.env.SMTP_PORT || "587",
+      user: process.env.SMTP_USER || "",
+      pass: "",
+      from: process.env.EMAIL_FROM || '"pySync Notifications" <noreply@pysync.local>'
+    };
+
+    const obscuredConfig = {
+      ...config,
+      pass: config.pass ? "••••••••" : ""
+    };
+
+    res.json(obscuredConfig);
+  });
+
+  app.post("/api/smtp/config", checkPermission('MANAGE_USERS'), async (req: Request, res: Response) => {
+    const db = getDb();
+    if (!db) return res.status(500).json({ error: "Database not found" });
+
+    const { host, port, user, pass, from } = req.body;
+    
+    if (!host || !port || !user || !from) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const currentConfig = db.smtp_config || {};
+    const finalPass = (pass === "••••••••" || !pass) ? (currentConfig.pass || process.env.SMTP_PASS || "") : pass;
+
+    db.smtp_config = {
+      host,
+      port,
+      user,
+      pass: finalPass,
+      from
+    };
+
+    saveDb(db);
+
+    const caller = (req.headers['x-user-name'] || 'Admin') as string;
+    const userId = req.headers['x-user-id'] as string;
+    await createLog('SECURITY_UPDATE', caller, 'Updated SMTP credentials settings', userId);
+
+    res.json({ success: true, message: "SMTP configuration updated successfully." });
+  });
+
+  app.post("/api/smtp/test", checkPermission('MANAGE_USERS'), async (req: Request, res: Response) => {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: "Email address is required for testing." });
+    }
+
+    const testSubject = "SMTP Connection Test - pySync";
+    const testHtml = `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
+        <h2 style="color: #f59e0b; margin-top: 0; text-align: center;">SMTP Test Successful</h2>
+        <p>Congratulations! Your SMTP credentials on the pySync Real Estate Data Platform are correctly configured.</p>
+        <p>This is a test notification confirming that the platform can now send active notification emails.</p>
+        <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 20px 0;" />
+        <p style="color: #9ca3af; font-size: 10px; text-align: center;">pySync Real Estate Data Platform</p>
+      </div>
+    `;
+
+    try {
+      const db = getDb();
+      const dbSmtp = db?.smtp_config;
+
+      const host = (dbSmtp?.host || process.env.SMTP_HOST || '').trim();
+      const portStr = (dbSmtp?.port || process.env.SMTP_PORT || '587').toString().trim();
+      const user = (dbSmtp?.user || process.env.SMTP_USER || '').trim();
+      let pass = (dbSmtp?.pass || process.env.SMTP_PASS || '').trim();
+      const from = dbSmtp?.from || process.env.EMAIL_FROM || '"pySync Notifications" <noreply@pysync.local>';
+
+      pass = sanitizeSmtpCredentials(host, pass);
+
+      if (!host || !user || !pass) {
+        return res.status(400).json({ error: "SMTP is not fully configured yet. Please provide Host, User, and Password." });
+      }
+
+      const port = parseInt(portStr, 10) || 587;
+      const isSecure = port === 465;
+
+      const transport = nodemailer.createTransport({
+        host,
+        port,
+        secure: isSecure,
+        auth: { user, pass },
+        connectionTimeout: 8000,
+        greetingTimeout: 8000,
+        socketTimeout: 8000,
+        tls: {
+          rejectUnauthorized: false
+        }
+      });
+
+      const info = await transport.sendMail({
+        from,
+        to: email,
+        subject: testSubject,
+        html: testHtml
+      });
+
+      res.json({ success: true, message: `Test email sent successfully! Message ID: ${info.messageId}` });
+    } catch (err: any) {
+      console.error("Test SMTP error:", err);
+      const errMsg = err?.message || String(err);
+      if (errMsg.includes('535') || errMsg.includes('Invalid login') || errMsg.includes('Username and Password not accepted')) {
+        return res.status(400).json({
+          error: "Gmail/SMTP authentication failed (535 Invalid Login). If using Gmail, you must generate a 16-character Google App Password in your Google Account Security settings (https://myaccount.google.com/apppasswords) and enter it as your SMTP password."
+        });
+      }
+      res.status(500).json({ error: errMsg || "Failed to send test email. Please check your SMTP configuration." });
+    }
+  });
+
+  // --- NGINX + PM2 + Certbot Stack Configurations ---
+  app.get("/api/stack/config", checkPermission('MANAGE_USERS'), async (req: Request, res: Response) => {
+    const db = getDb();
+    const config = db?.stack_config || {
+      domain: "pysync.yourdomain.com",
+      email: "admin@yourdomain.com",
+      port: 3000,
+      instances: "max"
+    };
+    res.json(config);
+  });
+
+  app.post("/api/stack/save", checkPermission('MANAGE_USERS'), async (req: Request, res: Response) => {
+    const db = getDb();
+    if (!db) return res.status(500).json({ error: "Database not found" });
+
+    const { domain, email, port, instances } = req.body;
+    if (!domain || !email || !port || !instances) {
+      return res.status(400).json({ error: "Missing required fields for Stack Configuration" });
+    }
+
+    db.stack_config = { domain, email, port: Number(port), instances };
+    saveDb(db);
+
+    // Dynamic generation and writing of ecosystem.config.cjs
+    const ecosystemContent = `/**
+ * PM2 Process Manager Configuration for pySync CRM
+ * Generated automatically by PySync Stack Manager
+ */
+module.exports = {
+  apps: [
+    {
+      name: 'pysync-crm',
+      script: './dist/server.cjs',
+      instances: '${instances}',
+      exec_mode: 'cluster',
+      env: {
+        NODE_ENV: 'production',
+        PORT: ${port}
+      },
+      env_file: '.env',
+      max_memory_restart: '1G',
+      autorestart: true,
+      watch: false,
+      merge_logs: true,
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z'
+    }
+  ]
+};
+`;
+
+    // Dynamic generation and writing of nginx.conf
+    const nginxContent = `# Nginx Server Block Virtual Host configuration for pySync CRM
+# Generated automatically by PySync Stack Manager
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+
+    # Redirect all HTTP traffic to secure HTTPS
+    location / {
+        return 301 https://$host$request_uri;
+    }
+
+    # Certbot ACME challenge validation path
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${domain};
+
+    # SSL Certificates managed by Certbot Let's Encrypt
+    ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
+
+    # Secure SSL Protocols and Ciphers
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384';
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_tickets off;
+
+    # Security Headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Gzip Compression
+    gzip on;
+    gzip_proxied any;
+    gzip_types text/plain text/css application/json application/javascript text/xml;
+    gzip_comp_level 5;
+
+    # Backend API / Reverse Proxy configuration
+    location / {
+        proxy_pass http://127.0.0.1:${port};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Max body upload limits (useful for larger document transfers)
+        client_max_body_size 500M;
+    }
+
+    # Static Assets Long-term Caching
+    location /assets/ {
+        proxy_pass http://127.0.0.1:${port};
+        expires 30d;
+        add_header Cache-Control "public, no-transform";
+    }
+}
+`;
+
+    // Dynamic generation and writing of deploy.sh
+    const deployContent = `#!/bin/bash
+# pySync CRM Automated Deployment Script (Ubuntu/Debian)
+# NGINX + PM2 + Certbot Stack Setup
+# Generated automatically by PySync Stack Manager
+
+# Exit on any error
+set -e
+
+DOMAIN="${domain}"
+EMAIL="${email}"
+PORT="${port}"
+
+echo "================================================="
+echo "🚀 Starting pySync CRM Stack Deployment on Host"
+echo "Target Domain: \\\$DOMAIN"
+echo "Internal Port: \\\$PORT"
+echo "Alert SSL Email: \\\$EMAIL"
+echo "================================================="
+
+# 1. Update Package repositories
+echo "Updating apt packages..."
+sudo apt update -y
+
+# 2. Install curl and git if missing
+sudo apt install -y curl git gnupg
+
+# 3. Install Node.js (v20 LTS)
+if ! command -v node &> /dev/null; then
+    echo "Installing Node.js v20..."
+    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+    sudo apt install -y nodejs
+else
+    echo "Node.js already installed: \$(node -v)"
+fi
+
+# 4. Install PM2 globally
+if ! command -v pm2 &> /dev/null; then
+    echo "Installing PM2 globally..."
+    sudo npm install -y pm2 -g
+else
+    echo "PM2 already installed: \$(pm2 -v)"
+fi
+
+# 5. Install NGINX
+if ! command -v nginx &> /dev/null; then
+    echo "Installing NGINX..."
+    sudo apt install -y nginx
+else
+    echo "NGINX already installed."
+fi
+
+# 6. Install Certbot
+if ! command -v certbot &> /dev/null; then
+    echo "Installing Certbot..."
+    sudo apt install -y certbot python3-certbot-nginx
+else
+    echo "Certbot already installed."
+fi
+
+# 7. Configure Temporary HTTP Server block for ACME challenge
+echo "Creating HTTP Nginx configuration..."
+sudo tee /etc/nginx/sites-available/pysync.conf > /dev/null <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name \\\${DOMAIN};
+
+    location / {
+        proxy_pass http://127.0.0.1:\\\${PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \\\${http_upgrade};
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \\\${host};
+        proxy_cache_bypass \\\${http_upgrade};
+    }
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+}
+EOF
+
+# Link configuration
+sudo ln -sf /etc/nginx/sites-available/pysync.conf /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+
+# Test & reload
+sudo nginx -t
+sudo systemctl reload nginx
+
+# 8. Request SSL Certificate
+echo "Requesting SSL certificates..."
+sudo certbot --nginx --non-interactive --agree-tos --email "\\\${EMAIL}" -d "\\\${DOMAIN}" --redirect
+
+# 9. Overwrite with full production secure SSL server block
+echo "Applying final secure HTTPS configuration..."
+sudo tee /etc/nginx/sites-available/pysync.conf > /dev/null <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name \\\${DOMAIN};
+    return 301 https://\\\${host}\\\$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name \\\${DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/\\\${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/\\\${DOMAIN}/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384';
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_tickets off;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml;
+
+    location / {
+        proxy_pass http://127.0.0.1:\\\${PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \\\${http_upgrade};
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \\\${host};
+        proxy_cache_bypass \\\${http_upgrade};
+        proxy_set_header X-Real-IP \\\${remote_addr};
+        proxy_set_header X-Forwarded-For \\\${proxy_add_x_forwarded_for};
+        proxy_set_header X-Forwarded-Proto \\\${scheme};
+        client_max_body_size 500M;
+    }
+}
+EOF
+
+# Test & reload final configuration
+sudo nginx -t
+sudo systemctl reload nginx
+
+# 10. Install production dependencies and boot up PM2
+echo "Installing production dependencies..."
+npm install --omit=dev --legacy-peer-deps || npm install --legacy-peer-deps
+
+echo "Building production bundles..."
+npm run build
+
+echo "Starting/Reloading process with PM2..."
+if pm2 show pysync-crm &> /dev/null; then
+    pm2 reload ecosystem.config.cjs
+else
+    pm2 start ecosystem.config.cjs
+fi
+
+sudo env PATH=\\\${PATH}:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u \\\${USER} --hp \\\${HOME}
+pm2 save
+
+echo "================================================="
+echo "🎉 pySync CRM stack deployment complete!"
+echo "Check your site at: https://$DOMAIN"
+echo "================================================="
+`;
+
+    try {
+      fs.writeFileSync(path.join(process.cwd(), "ecosystem.config.cjs"), ecosystemContent);
+      fs.writeFileSync(path.join(process.cwd(), "nginx.conf"), nginxContent);
+      fs.writeFileSync(path.join(process.cwd(), "deploy.sh"), deployContent);
+      // set executable permission on deploy.sh
+      fs.chmodSync(path.join(process.cwd(), "deploy.sh"), "755");
+    } catch (fsErr: any) {
+      console.error("Failed to write physical stack config files:", fsErr);
+      return res.status(500).json({ error: "Failed to write config files to disk: " + fsErr.message });
+    }
+
+    const caller = (req.headers['x-user-name'] || 'Admin') as string;
+    const userId = req.headers['x-user-id'] as string;
+    await createLog('SYSTEM_UPDATE', caller, `Updated NGINX+PM2+Certbot Stack configurations for ${domain}`, userId);
+
+    res.json({
+      success: true,
+      message: "Server stack configurations saved and deployment files generated successfully!",
+      files: {
+        ecosystem: ecosystemContent,
+        nginx: nginxContent,
+        deploy: deployContent
+      }
+    });
   });
 
   // Public External API
